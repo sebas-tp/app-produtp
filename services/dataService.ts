@@ -1,5 +1,6 @@
 import { db } from '../src/firebaseConfig';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc } from 'firebase/firestore';
+// AGREGADO 'where' a los imports
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, setDoc, where } from 'firebase/firestore';
 import { POINTS_MATRIX as DEFAULT_MATRIX, OPERATORS as DEFAULT_OPS, MODELS as DEFAULT_MODELS, OPERATIONS as DEFAULT_OPERATIONS } from '../constants';
 import { ProductionLog, Sector, PointRule } from '../types';
 import jsPDF from 'jspdf';
@@ -42,13 +43,12 @@ export const getPointsMatrix = async (): Promise<PointRule[]> => {
   }
 };
 
-// --- METAS DE PRODUCTIVIDAD (NUEVO) ---
+// --- METAS DE PRODUCTIVIDAD ---
 
 const DEFAULT_TARGET = 24960; 
 
 export const getProductivityTarget = async (): Promise<number> => {
   try {
-    // Buscamos en la colección de configuración
     const querySnapshot = await getDocs(collection(db, CONFIG_COL));
     const targetDoc = querySnapshot.docs.find(d => d.id === 'productivity_target');
     
@@ -63,7 +63,6 @@ export const getProductivityTarget = async (): Promise<number> => {
 };
 
 export const saveProductivityTarget = async (value: number) => {
-  // Guardamos en un documento específico dentro de app_config
   await setDoc(doc(db, CONFIG_COL, 'productivity_target'), { value });
 };
 
@@ -95,11 +94,8 @@ export const deletePointRule = async (id: string) => {
   await deleteDoc(doc(db, 'points_matrix', id));
 }
 
-// Agrega esto en services/dataService.ts
-
 export const updatePointRule = async (rule: PointRule) => {
   const { id, ...data } = rule;
-  // Referencia al documento exacto por su ID
   const docRef = doc(db, 'points_matrix', id);
   await updateDoc(docRef, data);
 }
@@ -126,7 +122,6 @@ export const saveLog = async (log: ProductionLog): Promise<void> => {
   await addDoc(collection(db, LOGS_COL), logData);
 };
 
-// Función para editar registros existentes
 export const updateProductionLog = async (log: ProductionLog): Promise<void> => {
   const { id, ...logData } = log;
   const docRef = doc(db, LOGS_COL, id); 
@@ -152,6 +147,43 @@ export const clearLogs = async (): Promise<void> => {
   const snapshot = await getDocs(q);
   const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
   await Promise.all(deletePromises);
+};
+
+// --- SISTEMA DE NOTICIAS / COMUNICADOS (NUEVO) ---
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  expiresAt: string;
+  priority: 'normal' | 'high';
+}
+
+export const addNews = async (news: NewsItem) => {
+  const { id, ...data } = news;
+  await setDoc(doc(db, 'news', id), data);
+};
+
+export const deleteNews = async (id: string) => {
+  await deleteDoc(doc(db, 'news', id));
+};
+
+export const getActiveNews = async (): Promise<NewsItem[]> => {
+  try {
+    const now = new Date().toISOString();
+    // Traer solo noticias donde 'expiresAt' sea mayor (futuro) a 'ahora'
+    const q = query(collection(db, 'news'), where('expiresAt', '>', now));
+    const querySnapshot = await getDocs(q);
+    
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as NewsItem));
+  } catch (error) {
+    console.error("Error fetching news:", error);
+    return [];
+  }
 };
 
 // --- EXPORT UTILS ---
