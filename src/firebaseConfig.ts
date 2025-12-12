@@ -5,12 +5,12 @@ import { getFirestore } from "firebase/firestore";
 // Si usas Vercel, es mejor usar variables de entorno (process.env), 
 // pero para empezar rápido puedes pegar los datos aquí directos.
 const firebaseConfig = {
-  apiKey: process.env.FIREBASE_API_KEY || "TU_API_KEY_AQUI",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO_ID",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID"
+  apiKey: process.env.FIREBASE_API_KEY || "AIzaSyDYAX9gis2MKtEabUzZDPFUlhmeX38U_Bs",
+  authDomain: "produccion-topsafe.firebaseapp.com",
+  projectId: "produccion-topsafe",
+  storageBucket: "produccion-topsafe.firebasestorage.app",
+  messagingSenderId: "798185919710",
+  appId: "1:798185919710:web:bf420d718d7bc2b3e9de4f"
 };
 
 const app = initializeApp(firebaseConfig);
