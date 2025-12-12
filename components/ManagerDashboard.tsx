@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { getLogs, clearLogs, downloadCSV, downloadPDF } from '../services/dataService';
+// Agregamos getProductivityTarget y saveProductivityTarget a los imports
+import { getLogs, clearLogs, downloadCSV, downloadPDF, getProductivityTarget, saveProductivityTarget } from '../services/dataService';
 import { ProductionLog } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Trash2, BrainCircuit, RefreshCw, FileDown, FileText, Calendar, Loader2 } from 'lucide-react';
+import { Trash2, BrainCircuit, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, Pencil, Save, Trophy, AlertTriangle } from 'lucide-react';
 import { analyzeProductionData } from '../services/geminiService';
 import ReactMarkdown from 'react-markdown';
 
@@ -11,10 +12,14 @@ export const ManagerDashboard: React.FC = () => {
   const [filteredLogs, setFilteredLogs] = useState<ProductionLog[]>([]); 
   const [loading, setLoading] = useState(true);
   
+  // Estados para la Meta de Productividad
+  const [dailyTarget, setDailyTarget] = useState<number>(24960);
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+  const [tempTarget, setTempTarget] = useState<string>("24960");
+
   const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7); 
-    return d.toISOString().split('T')[0];
+    // Por defecto hoy, para ver el rendimiento diario inmediato
+    return new Date().toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
@@ -23,6 +28,11 @@ export const ManagerDashboard: React.FC = () => {
 
   useEffect(() => {
     refreshData();
+    // Cargar la meta al iniciar
+    getProductivityTarget().then(target => {
+      setDailyTarget(target);
+      setTempTarget(target.toString());
+    });
   }, []);
 
   useEffect(() => {
@@ -40,12 +50,25 @@ export const ManagerDashboard: React.FC = () => {
     const start = new Date(startDate);
     const end = new Date(endDate);
     
+    // Ajuste zona horaria simple para comparación de strings
     const filtered = allLogs.filter(log => {
       const logDate = log.timestamp.split('T')[0];
       return logDate >= startDate && logDate <= endDate;
     });
     
     setFilteredLogs(filtered);
+  };
+
+  const handleSaveTarget = async () => {
+    const newVal = parseInt(tempTarget);
+    if (!isNaN(newVal) && newVal > 0) {
+      await saveProductivityTarget(newVal);
+      setDailyTarget(newVal);
+      setIsEditingTarget(false);
+      refreshData(); // Recargar para actualizar visualizaciones si fuera necesario
+    } else {
+      alert("Ingrese un número válido mayor a 0");
+    }
   };
 
   const handleClearData = async () => {
@@ -74,12 +97,26 @@ export const ManagerDashboard: React.FC = () => {
     setIsAnalyzing(false);
   };
 
-  const pointsByOperator = Object.values(filteredLogs.reduce((acc, log) => {
-    if (!acc[log.operatorName]) acc[log.operatorName] = { name: log.operatorName, points: 0 };
+  // --- LÓGICA DE RENDIMIENTO ---
+  const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
+    if (!acc[log.operatorName]) {
+      acc[log.operatorName] = { 
+        name: log.operatorName, 
+        points: 0, 
+        quantity: 0 
+      };
+    }
     acc[log.operatorName].points += log.totalPoints;
+    acc[log.operatorName].quantity += log.quantity;
     return acc;
-  }, {} as Record<string, { name: string; points: number }>));
+  }, {} as Record<string, { name: string; points: number; quantity: number }>))
+  .map(stat => {
+    const percentage = (stat.points / dailyTarget) * 100;
+    return { ...stat, percentage };
+  })
+  .sort((a, b) => b.points - a.points); // Ordenar de mayor a menor productividad
 
+  // Datos para gráficos
   const countBySector = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.sector]) acc[log.sector] = { name: log.sector, value: 0 };
     acc[log.sector].value += log.quantity;
@@ -106,17 +143,17 @@ export const ManagerDashboard: React.FC = () => {
           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
              <Calendar className="w-4 h-4 text-slate-500" />
              <input 
-                type="date" 
-                value={startDate} 
-                onChange={e => setStartDate(e.target.value)}
-                className="bg-transparent text-sm outline-none text-slate-700"
+               type="date" 
+               value={startDate} 
+               onChange={e => setStartDate(e.target.value)}
+               className="bg-transparent text-sm outline-none text-slate-700"
              />
              <span className="text-slate-400">-</span>
              <input 
-                type="date" 
-                value={endDate} 
-                onChange={e => setEndDate(e.target.value)}
-                className="bg-transparent text-sm outline-none text-slate-700"
+               type="date" 
+               value={endDate} 
+               onChange={e => setEndDate(e.target.value)}
+               className="bg-transparent text-sm outline-none text-slate-700"
              />
           </div>
 
@@ -145,8 +182,45 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* KPI Cards Row 1 */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        
+        {/* NUEVO: Tarjeta Configurable de META */}
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
+          <div className="flex justify-between items-start mb-2">
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+              <Target className="w-4 h-4 text-amber-500" /> Meta Diaria
+            </p>
+            {!isEditingTarget ? (
+              <button onClick={() => setIsEditingTarget(true)} className="text-slate-400 hover:text-white transition-colors">
+                <Pencil className="w-4 h-4" />
+              </button>
+            ) : (
+              <button onClick={handleSaveTarget} className="text-emerald-400 hover:text-emerald-300 transition-colors">
+                <Save className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          
+          {isEditingTarget ? (
+            <div className="flex items-center gap-2 mt-1">
+              <input 
+                type="number" 
+                value={tempTarget} 
+                onChange={(e) => setTempTarget(e.target.value)}
+                className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xl font-bold w-full text-white outline-none focus:border-amber-500"
+                autoFocus
+              />
+            </div>
+          ) : (
+            <p className="text-3xl font-black mt-1 tracking-tight">
+              {dailyTarget.toLocaleString()} <span className="text-sm font-normal text-slate-400">pts</span>
+            </p>
+          )}
+          <p className="text-xs text-slate-500 mt-2">Objetivo base para cálculo de eficiencia.</p>
+        </div>
+
+        {/* KPIs Existentes */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <p className="text-sm text-slate-500 font-medium uppercase">Producción Periodo (u)</p>
           <p className="text-3xl font-bold text-slate-800 mt-2">
@@ -164,6 +238,82 @@ export const ManagerDashboard: React.FC = () => {
           <p className="text-3xl font-bold text-emerald-600 mt-2">
             {filteredLogs.length}
           </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* NUEVO: Tabla de Eficiencia de Operarios */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
+          <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <Trophy className="w-5 h-5 text-amber-500" />
+            Cumplimiento de Objetivos
+          </h3>
+          <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+             {operatorStats.map((stat) => (
+               <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                 <div className="flex justify-between items-center mb-1">
+                   <span className="font-bold text-slate-700">{stat.name}</span>
+                   {stat.percentage >= 100 ? (
+                     <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold border border-green-200">
+                       ¡CUMPLIDO!
+                     </span>
+                   ) : (
+                     <span className="text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full font-bold border border-orange-100">
+                       EN PROCESO
+                     </span>
+                   )}
+                 </div>
+                 
+                 <div className="flex justify-between items-end text-sm mb-1">
+                   <span className="text-slate-500">{stat.points.toFixed(0)} / {dailyTarget} pts</span>
+                   <span className={`font-black ${stat.percentage >= 100 ? 'text-green-600' : 'text-slate-600'}`}>
+                     {stat.percentage.toFixed(1)}%
+                   </span>
+                 </div>
+
+                 {/* Barra de progreso */}
+                 <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                    <div 
+                      className={`h-full ${stat.percentage >= 100 ? 'bg-green-500' : 'bg-amber-500'}`} 
+                      style={{ width: `${Math.min(stat.percentage, 100)}%` }}
+                    ></div>
+                 </div>
+                 
+                 {/* Feedback de Puntos Restantes/Extra */}
+                 <div className="mt-1 text-right">
+                   {stat.percentage >= 100 ? (
+                      <span className="text-xs text-green-600 font-semibold">
+                        +{ (stat.percentage - 100).toFixed(1) }% extra
+                      </span>
+                   ) : (
+                      <span className="text-xs text-orange-500 font-semibold">
+                        Faltan { (dailyTarget - stat.points).toFixed(0) } pts
+                      </span>
+                   )}
+                 </div>
+               </div>
+             ))}
+             {operatorStats.length === 0 && (
+               <div className="text-center text-slate-400 py-8 text-sm italic">
+                 No hay datos en este periodo.
+               </div>
+             )}
+          </div>
+        </div>
+
+        {/* Gráfico de Barras existente (ajustado para ocupar 2 columnas) */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-2 h-96">
+          <h3 className="text-md font-semibold text-slate-700 mb-4">Puntos por Operario (Comparativa)</h3>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={operatorStats /* Usamos los stats que ya calculamos */}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{fontSize: 12}} />
+              <YAxis />
+              <Tooltip />
+              {/* Línea de referencia visual para la meta */}
+              <Bar dataKey="points" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Puntos" />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
@@ -190,45 +340,6 @@ export const ManagerDashboard: React.FC = () => {
             {filteredLogs.length === 0 ? "No hay datos en el rango seleccionado." : "Presione el botón para detectar ineficiencias automáticamente."}
           </p>
         )}
-      </div>
-
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm h-80">
-          <h3 className="text-md font-semibold text-slate-700 mb-4">Puntos por Operario</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={pointsByOperator}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tick={{fontSize: 12}} />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="points" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-sm h-80">
-          <h3 className="text-md font-semibold text-slate-700 mb-4">Producción por Sector</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={countBySector}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={80}
-                fill="#8884d8"
-                paddingAngle={5}
-                dataKey="value"
-              >
-                {countBySector.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
       </div>
 
       {/* Data Table */}
