@@ -3,9 +3,9 @@ import { Sector, ProductionLog, PointRule } from '../types';
 import { 
   calculatePointsSync, getPointRuleSync, saveLog, getLogs, 
   getOperators, getModels, getOperations, getPointsMatrix, downloadCSV,
-  updateProductionLog, getProductivityTarget // <--- IMPORTANTE: Importamos esto
+  updateProductionLog, getProductivityTarget 
 } from '../services/dataService';
-import { Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, Pencil, X, RefreshCw, Trophy, Target } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, Pencil, X, RefreshCw, Trophy, Target, Calendar } from 'lucide-react';
 
 export const OperatorForm: React.FC = () => {
   // Dynamic Lists
@@ -13,13 +13,16 @@ export const OperatorForm: React.FC = () => {
   const [modelList, setModelList] = useState<string[]>([]);
   const [operationList, setOperationList] = useState<string[]>([]);
   const [matrix, setMatrix] = useState<PointRule[]>([]);
-  const [dailyTarget, setDailyTarget] = useState<number>(24960); // Meta por defecto
+  const [dailyTarget, setDailyTarget] = useState<number>(24960);
    
   // Data State
-  const [todayLogs, setTodayLogs] = useState<ProductionLog[]>([]);
+  const [currentViewLogs, setCurrentViewLogs] = useState<ProductionLog[]>([]); // Renombrado para que tenga sentido con el filtro
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // --- NUEVO ESTADO: FECHA SELECCIONADA ---
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [formData, setFormData] = useState({
     operatorName: '',
@@ -35,11 +38,12 @@ export const OperatorForm: React.FC = () => {
   const [unitValue, setUnitValue] = useState<number>(0);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  // KPI Calculation
-  const totalPointsToday = todayLogs.reduce((acc, log) => acc + log.totalPoints, 0);
-  const progressPercent = dailyTarget > 0 ? (totalPointsToday / dailyTarget) * 100 : 0;
+  // KPI Calculation (Se basa en la fecha que estás mirando)
+  const totalPointsView = currentViewLogs.reduce((acc, log) => acc + log.totalPoints, 0);
+  const progressPercent = dailyTarget > 0 ? (totalPointsView / dailyTarget) * 100 : 0;
   const isGoalReached = progressPercent >= 100;
 
+  // Initialization
   useEffect(() => {
     const initData = async () => {
       setIsLoading(true);
@@ -49,14 +53,14 @@ export const OperatorForm: React.FC = () => {
           getModels(),
           getOperations(),
           getPointsMatrix(),
-          getProductivityTarget() // Traemos la meta configurada
+          getProductivityTarget()
         ]);
         setOperatorList(ops);
         setModelList(mods);
         setOperationList(opers);
         setMatrix(mtx);
         setDailyTarget(target);
-        await loadTodayLogs();
+        await loadLogsByDate();
       } catch (e) {
         console.error("Error loading init data", e);
       } finally {
@@ -66,22 +70,24 @@ export const OperatorForm: React.FC = () => {
     initData();
   }, []);
 
+  // Recargar si cambia el Operario O la Fecha seleccionada
   useEffect(() => {
-    if (!isLoading) loadTodayLogs();
-  }, [formData.operatorName]);
+    if (!isLoading) loadLogsByDate();
+  }, [formData.operatorName, selectedDate]);
 
-  const loadTodayLogs = async () => {
+  const loadLogsByDate = async () => {
     const allLogs = await getLogs();
-    const today = new Date().toISOString().split('T')[0];
     
     const filtered = allLogs.filter(log => {
       const logDate = log.timestamp.split('T')[0];
       const matchesOperator = formData.operatorName ? log.operatorName === formData.operatorName : true;
-      return logDate === today && matchesOperator;
+      // Filtramos por la fecha seleccionada en el calendario
+      return logDate === selectedDate && matchesOperator;
     });
-    setTodayLogs(filtered);
+    setCurrentViewLogs(filtered);
   };
 
+  // Auto-calculate points
   useEffect(() => {
     const qty = parseInt(formData.quantity) || 0;
     const rule = getPointRuleSync(matrix, formData.sector, formData.model, formData.operation);
@@ -120,12 +126,16 @@ export const OperatorForm: React.FC = () => {
       alert("Por favor complete todos los campos requeridos");
       return;
     }
+
     if (unitValue === 0) {
       if (!window.confirm("Esta combinación vale 0 puntos. ¿Guardar igual?")) return;
     }
 
     setIsSaving(true);
     try {
+      // Usamos la fecha actual REAL para el timestamp de creación, aunque estemos mirando el historial
+      // Opcional: Si quieres permitir "Cargar cosas con fecha de ayer", tendríamos que cambiar esto.
+      // Por seguridad, dejamos que siempre se guarde con fecha/hora actual del sistema.
       const logData = {
         timestamp: new Date().toISOString(),
         ...formData,
@@ -140,7 +150,12 @@ export const OperatorForm: React.FC = () => {
       }
 
       setStatus('success');
-      await loadTodayLogs(); 
+      // Si el usuario estaba viendo "Ayer" y guarda algo "Hoy", 
+      // cambiamos la vista a "Hoy" para que vea lo que acaba de hacer.
+      const today = new Date().toISOString().split('T')[0];
+      if (selectedDate !== today) setSelectedDate(today);
+      else await loadLogsByDate();
+      
       setEditingId(null);
       setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' }));
       setTimeout(() => setStatus('idle'), 3000);
@@ -158,8 +173,8 @@ export const OperatorForm: React.FC = () => {
   };
 
   const handleDownload = () => {
-    const filename = `Produccion_${formData.operatorName || 'General'}_${new Date().toISOString().split('T')[0]}`;
-    downloadCSV(todayLogs, filename);
+    const filename = `Produccion_${formData.operatorName || 'General'}_${selectedDate}`;
+    downloadCSV(currentViewLogs, filename);
   };
 
   if (isLoading) return <div className="flex justify-center items-center h-64"><Loader2 className="w-10 h-10 animate-spin text-amber-500"/></div>;
@@ -278,7 +293,7 @@ export const OperatorForm: React.FC = () => {
         </form>
       </div>
 
-      {/* --- NUEVO: TARJETA DE OBJETIVO (KPI) --- */}
+      {/* TARJETA DE OBJETIVO (KPI) - Se actualiza según la fecha seleccionada */}
       {formData.operatorName && (
         <div className="bg-white rounded-xl shadow-md p-6 border border-slate-200">
           <div className="flex justify-between items-end mb-2">
@@ -287,13 +302,16 @@ export const OperatorForm: React.FC = () => {
                 <Target className="w-5 h-5 text-amber-600" />
                 Meta Diaria: {dailyTarget.toLocaleString()} pts
               </h3>
-              <p className="text-sm text-slate-500">Progreso actual de {formData.operatorName}</p>
+              <p className="text-sm text-slate-500">
+                Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">
+                  {selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : selectedDate}
+                </span>
+              </p>
             </div>
             <div className={`text-2xl font-black ${isGoalReached ? 'text-green-600' : 'text-slate-700'}`}>
               {progressPercent.toFixed(1)}%
             </div>
           </div>
-          {/* Barra de progreso visual */}
           <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden">
             <div 
               className={`h-full transition-all duration-1000 ${isGoalReached ? 'bg-green-500' : 'bg-amber-500'}`} 
@@ -308,36 +326,57 @@ export const OperatorForm: React.FC = () => {
         </div>
       )}
 
-      {/* HISTORIAL DIARIO */}
+      {/* HISTORIAL / LISTADO */}
       {formData.operatorName && (
         <div className="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200">
-          <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+          <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50">
             <div>
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
                 <History className="w-5 h-5 text-amber-600" />
-                Mi Producción de Hoy
+                Historial de Producción
               </h3>
             </div>
-            <button onClick={handleDownload} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm" disabled={todayLogs.length === 0}>
-              <FileDown className="w-4 h-4" /> Excel
-            </button>
+            
+            {/* NUEVO: FILTRO DE FECHA */}
+            <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-300 shadow-sm">
+                    <Calendar className="w-4 h-4 text-slate-500" />
+                    <input 
+                        type="date" 
+                        value={selectedDate}
+                        onChange={(e) => setSelectedDate(e.target.value)}
+                        className="bg-transparent text-sm text-slate-700 font-medium outline-none"
+                    />
+                </div>
+
+                <button onClick={handleDownload} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm" disabled={currentViewLogs.length === 0}>
+                <FileDown className="w-4 h-4" /> Excel
+                </button>
+            </div>
           </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-slate-500 uppercase bg-slate-100">
                 <tr>
                   <th className="px-4 py-2">Modelo</th>
                   <th className="px-4 py-2">Operación</th>
+                  {/* NUEVAS COLUMNAS DE HORA */}
+                  <th className="px-4 py-2 text-center">Inicio</th>
+                  <th className="px-4 py-2 text-center">Fin</th>
                   <th className="px-4 py-2 text-right">Cant.</th>
                   <th className="px-4 py-2 text-right">Puntos</th>
                   <th className="px-4 py-2 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody>
-                {todayLogs.map(log => (
+                {currentViewLogs.map(log => (
                   <tr key={log.id} className={`border-b border-slate-50 hover:bg-slate-50 ${editingId === log.id ? 'bg-blue-50' : ''}`}>
                     <td className="px-4 py-2 font-medium text-slate-700">{log.model}</td>
                     <td className="px-4 py-2 text-slate-600">{log.operation}</td>
+                    {/* CELDAS DE HORA */}
+                    <td className="px-4 py-2 text-center text-slate-500 text-xs">{log.startTime}</td>
+                    <td className="px-4 py-2 text-center text-slate-500 text-xs">{log.endTime}</td>
                     <td className="px-4 py-2 text-right font-bold">{log.quantity}</td>
                     <td className="px-4 py-2 text-right text-amber-600 font-bold">{log.totalPoints.toFixed(1)}</td>
                     <td className="px-4 py-2 text-center">
@@ -347,14 +386,14 @@ export const OperatorForm: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-                {todayLogs.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 italic">No hay registros hoy.</td></tr>}
+                {currentViewLogs.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No hay registros para la fecha seleccionada.</td></tr>}
               </tbody>
-              {todayLogs.length > 0 && (
+              {currentViewLogs.length > 0 && (
                 <tfoot className="bg-slate-50 font-bold text-slate-800">
                   <tr>
-                    <td colSpan={2} className="px-4 py-2 text-right">TOTAL HOY:</td>
-                    <td className="px-4 py-2 text-right">{todayLogs.reduce((a,b) => a + b.quantity, 0)}</td>
-                    <td className="px-4 py-2 text-right text-amber-600">{totalPointsToday.toFixed(1)}</td>
+                    <td colSpan={4} className="px-4 py-2 text-right">TOTAL DEL DÍA:</td>
+                    <td className="px-4 py-2 text-right">{currentViewLogs.reduce((a,b) => a + b.quantity, 0)}</td>
+                    <td className="px-4 py-2 text-right text-amber-600">{totalPointsView.toFixed(1)}</td>
                     <td></td>
                   </tr>
                 </tfoot>
