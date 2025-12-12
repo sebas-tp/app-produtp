@@ -42,6 +42,31 @@ export const getPointsMatrix = async (): Promise<PointRule[]> => {
   }
 };
 
+// --- METAS DE PRODUCTIVIDAD (NUEVO) ---
+
+const DEFAULT_TARGET = 24960; 
+
+export const getProductivityTarget = async (): Promise<number> => {
+  try {
+    // Buscamos en la colección de configuración
+    const querySnapshot = await getDocs(collection(db, CONFIG_COL));
+    const targetDoc = querySnapshot.docs.find(d => d.id === 'productivity_target');
+    
+    if (targetDoc && targetDoc.exists()) {
+      return targetDoc.data().value as number;
+    }
+    return DEFAULT_TARGET;
+  } catch (error) {
+    console.error("Error fetching target:", error);
+    return DEFAULT_TARGET;
+  }
+};
+
+export const saveProductivityTarget = async (value: number) => {
+  // Guardamos en un documento específico dentro de app_config
+  await setDoc(doc(db, CONFIG_COL, 'productivity_target'), { value });
+};
+
 // --- CONFIGURATION SETTERS (Async) ---
 
 const saveConfigList = async (docId: string, list: string[]) => {
@@ -58,12 +83,6 @@ export const saveModels = async (list: string[]) => saveConfigList('models', lis
 export const saveOperations = async (list: string[]) => saveConfigList('operations', list);
 
 export const savePointsMatrix = async (list: PointRule[]) => {
-  // Batch update strategy implied or simple replace logic
-  // For simplicity in this version, we handle adds/deletes in the UI component individually for Firestore
-  // But to keep compatibility with the previous interface:
-  // WARNING: This implementation is simplified. In a real DB, you add/remove individual docs.
-  // We will assume the UI sends the full list and we might re-sync. 
-  // For now, let's just Log it as not fully supported in bulk or require UI refactor.
   console.warn("Bulk save matrix not optimized for Firestore. Use addRule/deleteRule.");
 };
 
@@ -78,8 +97,6 @@ export const deletePointRule = async (id: string) => {
 
 // --- BUSINESS LOGIC (Hybrid) ---
 
-// This needs the matrix loaded first. We will assume the UI passes the matrix or we fetch it.
-// To keep it sync for calculations, we recommend fetching matrix once in the component.
 export const calculatePointsSync = (matrix: PointRule[], sector: Sector, model: string, operation: string, quantity: number): number => {
   const rule = matrix.find(
     (r) => r.sector === sector && r.model === model && r.operation === operation
@@ -92,22 +109,19 @@ export const getPointRuleSync = (matrix: PointRule[], sector: Sector, model: str
     (r) => r.sector === sector && r.model === model && r.operation === operation
   );
 };
-// Agrega esto en services/dataService.ts
-
-export const updateProductionLog = async (log: ProductionLog): Promise<void> => {
-  const { id, ...logData } = log;
-  // Referencia al documento específico por su ID
-  const docRef = doc(db, 'production_logs', id); 
-  await updateDoc(docRef, logData);
-};
-
 
 // --- LOGGING PERSISTENCE (Async) ---
 
 export const saveLog = async (log: ProductionLog): Promise<void> => {
-  // Remove ID if it exists as we let Firestore generate it, or use it as doc ID
   const { id, ...logData } = log;
   await addDoc(collection(db, LOGS_COL), logData);
+};
+
+// Función para editar registros existentes
+export const updateProductionLog = async (log: ProductionLog): Promise<void> => {
+  const { id, ...logData } = log;
+  const docRef = doc(db, LOGS_COL, id); 
+  await updateDoc(docRef, logData);
 };
 
 export const getLogs = async (): Promise<ProductionLog[]> => {
@@ -125,14 +139,13 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
 };
 
 export const clearLogs = async (): Promise<void> => {
-  // Danger: deleting collection requires cloud functions or client loop
   const q = query(collection(db, LOGS_COL));
   const snapshot = await getDocs(q);
   const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
   await Promise.all(deletePromises);
 };
 
-// --- EXPORT UTILS (Unchanged logic, just types) ---
+// --- EXPORT UTILS ---
 
 export const downloadCSV = (logs: ProductionLog[], filename: string) => {
   if (logs.length === 0) {
@@ -198,7 +211,7 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
     body: tableRows,
     startY: 40,
     theme: 'grid',
-    headStyles: { fillColor: [217, 119, 6] }, // Amber-600
+    headStyles: { fillColor: [217, 119, 6] }, 
     styles: { fontSize: 9 },
   });
   doc.save(`${filename}.pdf`);
