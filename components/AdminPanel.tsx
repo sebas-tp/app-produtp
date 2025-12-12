@@ -4,10 +4,10 @@ import {
   getModels, saveModels, 
   getOperations, saveOperations, 
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
-  addNews, deleteNews, getActiveNews, NewsItem // <--- IMPORTANTE
+  addNews, deleteNews, getActiveNews, NewsItem 
 } from '../services/dataService';
 import { Sector, PointRule } from '../types';
-import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X, Megaphone, Clock } from 'lucide-react';
+import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database } from 'lucide-react';
 
 // --- SUB COMPONENTS FOR LIST MANAGEMENT ---
 const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data: string[], onSave: (d: string[]) => void, icon: any }) => {
@@ -66,7 +66,7 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
 
 // --- MAIN COMPONENT ---
 export const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'lists' | 'matrix' | 'news'>('lists');
+  const [activeTab, setActiveTab] = useState<'lists' | 'matrix' | 'news' | 'import'>('lists');
   const [loading, setLoading] = useState(true);
   
   // Lists Data
@@ -83,6 +83,10 @@ export const AdminPanel: React.FC = () => {
   const [activeNews, setActiveNews] = useState<NewsItem[]>([]);
   const [newsForm, setNewsForm] = useState({ title: '', content: '', duration: '24' });
 
+  // Bulk Import State
+  const [jsonImport, setJsonImport] = useState('');
+  const [importing, setImporting] = useState(false);
+
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
@@ -95,11 +99,12 @@ export const AdminPanel: React.FC = () => {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // ... (Funciones de Listas y Matriz igual que antes) ...
+  // ... Funciones de Listas ...
   const handleSaveOperators = async (newList: string[]) => { await saveOperators(newList); setOperators(newList); };
   const handleSaveModels = async (newList: string[]) => { await saveModels(newList); setModels(newList); };
   const handleSaveOperations = async (newList: string[]) => { await saveOperations(newList); setOperations(newList); };
 
+  // ... Funciones de Matriz ...
   const handleEditClick = (rule: PointRule) => {
     setEditingId(rule.id!); 
     setNewRule({ sector: rule.sector, model: rule.model, operation: rule.operation, pointsPerUnit: rule.pointsPerUnit });
@@ -127,36 +132,56 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Eliminar regla?")) { setLoading(true); await deletePointRule(id); await loadData(); }
   };
 
-  // --- LÓGICA DE NOTICIAS ---
+  // ... Funciones de Noticias ...
   const handleAddNews = async () => {
     if (!newsForm.title || !newsForm.content) { alert("Complete título y mensaje"); return; }
-    
     setLoading(true);
     const now = new Date();
     const expires = new Date(now);
     expires.setHours(expires.getHours() + parseInt(newsForm.duration));
-
-    const newItem: NewsItem = {
-      id: crypto.randomUUID(),
-      title: newsForm.title,
-      content: newsForm.content,
-      createdAt: now.toISOString(),
-      expiresAt: expires.toISOString(),
-      priority: 'normal'
-    };
-
+    const newItem: NewsItem = { id: crypto.randomUUID(), title: newsForm.title, content: newsForm.content, createdAt: now.toISOString(), expiresAt: expires.toISOString(), priority: 'normal' };
     await addNews(newItem);
     setNewsForm({ title: '', content: '', duration: '24' });
-    await loadData(); // Recargar lista
-    setLoading(false);
+    await loadData(); setLoading(false);
   };
 
   const handleDeleteNews = async (id: string) => {
-    if (window.confirm("¿Borrar comunicado?")) {
-      setLoading(true);
-      await deleteNews(id);
+    if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
+  };
+
+  // ... Función de Carga Masiva (NUEVA) ...
+  const handleBulkImport = async () => {
+    if (!jsonImport) return;
+    if (!window.confirm("¿Importar estos datos? Asegúrate que el formato sea correcto.")) return;
+
+    setImporting(true);
+    try {
+      const data = JSON.parse(jsonImport);
+      if (!Array.isArray(data)) { alert("El formato debe ser una lista [...]"); return; }
+
+      let count = 0;
+      for (const item of data) {
+        if (item.sector && item.model && item.operation && item.pointsPerUnit) {
+          // Normalizamos la mayúscula del sector por seguridad
+          const formattedSector = item.sector.charAt(0).toUpperCase() + item.sector.slice(1).toLowerCase();
+          
+          await addPointRule({
+            sector: formattedSector as Sector,
+            model: item.model.toString(),
+            operation: item.operation,
+            pointsPerUnit: Number(item.pointsPerUnit)
+          });
+          count++;
+        }
+      }
+      alert(`¡Éxito! Se cargaron ${count} reglas.`);
+      setJsonImport('');
       await loadData();
-      setLoading(false);
+    } catch (e) {
+      console.error(e);
+      alert("Error al leer el JSON.");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -170,10 +195,11 @@ export const AdminPanel: React.FC = () => {
       <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md border-l-4 border-orange-600">
         <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
         <p className="text-slate-300 text-sm">Administre catálogos, reglas y comunicados.</p>
-        <div className="flex gap-4 mt-6">
+        <div className="flex flex-wrap gap-4 mt-6">
           <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Catálogos</button>
           <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Matriz de Puntos</button>
           <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Comunicados</button>
+          <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>Carga Masiva</button>
         </div>
       </div>
 
@@ -253,65 +279,53 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'news' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {/* FORMULARIO NOTICIAS */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-fit">
-             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-               <Megaphone className="w-5 h-5 text-orange-600" /> Nuevo Comunicado
-             </h3>
+             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Megaphone className="w-5 h-5 text-orange-600" /> Nuevo Comunicado</h3>
              <div className="space-y-4">
-               <div>
-                 <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Título</label>
-                 <input 
-                   className="w-full border border-slate-300 p-2 rounded bg-slate-50 focus:ring-2 focus:ring-orange-500 outline-none" 
-                   placeholder="Ej: Mantenimiento Preventivo"
-                   value={newsForm.title} onChange={e => setNewsForm({...newsForm, title: e.target.value})}
-                 />
-               </div>
-               <div>
-                 <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Mensaje</label>
-                 <textarea 
-                   className="w-full border border-slate-300 p-2 rounded bg-slate-50 focus:ring-2 focus:ring-orange-500 outline-none h-24 resize-none" 
-                   placeholder="El día viernes se cortará la luz por..."
-                   value={newsForm.content} onChange={e => setNewsForm({...newsForm, content: e.target.value})}
-                 />
-               </div>
-               <div>
-                 <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Visible Por</label>
-                 <select 
-                   className="w-full border border-slate-300 p-2 rounded bg-slate-50 focus:ring-2 focus:ring-orange-500 outline-none"
-                   value={newsForm.duration} onChange={e => setNewsForm({...newsForm, duration: e.target.value})}
-                 >
-                   <option value="24">24 Horas</option>
-                   <option value="48">48 Horas</option>
-                   <option value="72">3 Días</option>
-                   <option value="168">1 Semana</option>
-                   <option value="720">1 Mes</option>
-                 </select>
-               </div>
-               <button onClick={handleAddNews} disabled={loading} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 flex justify-center items-center gap-2">
-                  {loading ? <Loader2 className="animate-spin w-5 h-5"/> : <Plus className="w-5 h-5" />} Publicar Noticia
-               </button>
+               <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Título</label><input className="w-full border border-slate-300 p-2 rounded bg-slate-50 focus:ring-2 focus:ring-orange-500 outline-none" placeholder="Ej: Mantenimiento Preventivo" value={newsForm.title} onChange={e => setNewsForm({...newsForm, title: e.target.value})}/></div>
+               <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Mensaje</label><textarea className="w-full border border-slate-300 p-2 rounded bg-slate-50 focus:ring-2 focus:ring-orange-500 outline-none h-24 resize-none" placeholder="El día viernes..." value={newsForm.content} onChange={e => setNewsForm({...newsForm, content: e.target.value})}/></div>
+               <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Visible Por</label><select className="w-full border border-slate-300 p-2 rounded bg-slate-50 focus:ring-2 focus:ring-orange-500 outline-none" value={newsForm.duration} onChange={e => setNewsForm({...newsForm, duration: e.target.value})}><option value="24">24 Horas</option><option value="48">48 Horas</option><option value="72">3 Días</option><option value="168">1 Semana</option></select></div>
+               <button onClick={handleAddNews} disabled={loading} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 flex justify-center items-center gap-2">{loading ? <Loader2 className="animate-spin w-5 h-5"/> : <Plus className="w-5 h-5" />} Publicar Noticia</button>
              </div>
           </div>
-
-          {/* LISTADO DE NOTICIAS ACTIVAS */}
           <div className="space-y-4">
-             <h3 className="font-bold text-slate-800 flex items-center gap-2">
-               <Clock className="w-5 h-5 text-blue-600" /> Comunicados Vigentes
-             </h3>
-             {activeNews.length === 0 && <p className="text-slate-400 text-sm italic">No hay noticias activas en este momento.</p>}
+             <h3 className="font-bold text-slate-800 flex items-center gap-2"><Clock className="w-5 h-5 text-blue-600" /> Comunicados Vigentes</h3>
+             {activeNews.length === 0 && <p className="text-slate-400 text-sm italic">No hay noticias activas.</p>}
              {activeNews.map(item => (
                <div key={item.id} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500 relative">
                  <button onClick={() => handleDeleteNews(item.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                  <h4 className="font-bold text-slate-800">{item.title}</h4>
                  <p className="text-slate-600 text-sm mt-1">{item.content}</p>
-                 <div className="mt-3 text-xs text-slate-400 flex gap-4">
-                    <span>Creado: {new Date(item.createdAt).toLocaleDateString()}</span>
-                    <span className="text-orange-600 font-semibold">Vence: {new Date(item.expiresAt).toLocaleString()}</span>
-                 </div>
+                 <div className="mt-3 text-xs text-slate-400 flex gap-4"><span>Creado: {new Date(item.createdAt).toLocaleDateString()}</span><span className="text-orange-600 font-semibold">Vence: {new Date(item.expiresAt).toLocaleString()}</span></div>
                </div>
              ))}
           </div>
+        </div>
+      )}
+
+      {/* --- PESTAÑA CARGA MASIVA (AGREGADA AHORA) --- */}
+      {activeTab === 'import' && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
+          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <Database className="w-5 h-5 text-indigo-600"/> Importar Matriz desde JSON
+          </h3>
+          <p className="text-sm text-slate-500 mb-4">
+            Pega aquí el array JSON generado. Asegúrate de usar las claves: <code className="bg-slate-100 px-1">sector</code>, <code className="bg-slate-100 px-1">model</code>, <code className="bg-slate-100 px-1">operation</code>, <code className="bg-slate-100 px-1">pointsPerUnit</code>.
+          </p>
+          <textarea
+            className="w-full h-64 border border-slate-300 p-4 rounded-lg font-mono text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder='[ {"sector": "Corte", "model": "10404", "operation": "Corte", "pointsPerUnit": 72.12}, ... ]'
+            value={jsonImport}
+            onChange={(e) => setJsonImport(e.target.value)}
+          />
+          <button 
+            onClick={handleBulkImport} 
+            disabled={importing || !jsonImport}
+            className="mt-4 bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 disabled:opacity-50 w-full flex justify-center items-center gap-2"
+          >
+            {importing ? <Loader2 className="animate-spin w-5 h-5"/> : <Upload className="w-5 h-5"/>} 
+            {importing ? 'Procesando...' : 'IMPORTAR DATOS AHORA'}
+          </button>
         </div>
       )}
     </div>
