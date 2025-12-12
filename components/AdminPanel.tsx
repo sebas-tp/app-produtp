@@ -3,10 +3,11 @@ import {
   getOperators, saveOperators, 
   getModels, saveModels, 
   getOperations, saveOperations, 
-  getPointsMatrix, addPointRule, deletePointRule
+  getPointsMatrix, addPointRule, deletePointRule,
+  updatePointRule // <--- IMPORTANTE: Asegúrate de tener esto en dataService
 } from '../services/dataService';
 import { Sector, PointRule } from '../types';
-import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2 } from 'lucide-react';
+import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X } from 'lucide-react';
 
 // --- SUB COMPONENTS FOR LIST MANAGEMENT ---
 
@@ -93,6 +94,7 @@ export const AdminPanel: React.FC = () => {
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   
   // Matrix Form State
+  const [editingId, setEditingId] = useState<string | null>(null); // Estado para saber si editamos
   const [newRule, setNewRule] = useState<Partial<PointRule>>({
     sector: Sector.CORTE,
     model: '',
@@ -140,30 +142,71 @@ export const AdminPanel: React.FC = () => {
     setOperations(newList);
   };
 
-  const handleAddRule = async () => {
+  // --- LÓGICA DE EDICIÓN ---
+  const handleEditClick = (rule: PointRule) => {
+    setEditingId(rule.id!); // Guardamos el ID que se edita
+    setNewRule({
+      sector: rule.sector,
+      model: rule.model,
+      operation: rule.operation,
+      pointsPerUnit: rule.pointsPerUnit
+    });
+    // Hacemos scroll suave hacia arriba
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setNewRule({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
+  };
+  // -------------------------
+
+  const handleSaveRule = async () => {
     if (!newRule.model || !newRule.operation || !newRule.pointsPerUnit) {
       alert("Complete todos los campos de la regla");
       return;
     }
 
-    const rule: PointRule = {
+    const ruleData = {
       sector: newRule.sector as Sector,
       model: newRule.model,
       operation: newRule.operation,
       pointsPerUnit: Number(newRule.pointsPerUnit)
     };
 
-    // Check duplicate locally
-    const exists = matrix.some(r => r.sector === rule.sector && r.model === rule.model && r.operation === rule.operation);
+    // Validación de Duplicados (Ignoramos el ID actual si estamos editando)
+    const exists = matrix.some(r => 
+      r.id !== editingId && // Si editamos, ignoramos nuestra propia regla vieja
+      r.sector === ruleData.sector && 
+      r.model === ruleData.model && 
+      r.operation === ruleData.operation
+    );
+
     if (exists) {
       alert("Ya existe una regla para esta combinación.");
       return;
     }
 
     setLoading(true);
-    await addPointRule(rule);
-    await loadData(); // Reload to get IDs
-    setNewRule(prev => ({ ...prev, pointsPerUnit: 0 }));
+    try {
+      if (editingId) {
+        // ACTUALIZAR
+        await updatePointRule({ id: editingId, ...ruleData });
+      } else {
+        // AGREGAR NUEVO
+        await addPointRule(ruleData as PointRule);
+      }
+      
+      await loadData();
+      // Resetear Formulario
+      setEditingId(null);
+      setNewRule(prev => ({ ...prev, pointsPerUnit: 0 }));
+    } catch (e) {
+      console.error(e);
+      alert("Error al guardar");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteRule = async (id?: string) => {
@@ -178,6 +221,10 @@ export const AdminPanel: React.FC = () => {
   if (loading && matrix.length === 0) {
       return <div className="flex justify-center p-10"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>
   }
+
+  // Estilos dinámicos para modo edición
+  const borderColor = editingId ? 'border-blue-500' : 'border-orange-100';
+  const buttonColor = editingId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-600 hover:bg-orange-700';
 
   return (
     <div className="space-y-6 pb-20">
@@ -226,18 +273,25 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'matrix' && (
         <div className="space-y-6">
-          {/* Add Rule Form */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-orange-100">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Calculator className="w-5 h-5 text-orange-600" />
-              Nueva Regla de Cálculo
-            </h3>
+          {/* Add / Edit Rule Form */}
+          <div className={`bg-white p-6 rounded-xl shadow-sm border ${borderColor} transition-colors`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                {editingId ? <RefreshCw className="w-5 h-5 text-blue-600" /> : <Calculator className="w-5 h-5 text-orange-600" />}
+                {editingId ? 'Editando Regla' : 'Nueva Regla de Cálculo'}
+              </h3>
+              {editingId && (
+                <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                  MODO EDICIÓN
+                </span>
+              )}
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
               <div>
                 <label className="text-xs font-semibold text-slate-500 uppercase">Sector</label>
                 <select 
-                  className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900"
+                  className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none focus:border-blue-500"
                   value={newRule.sector}
                   onChange={e => setNewRule({...newRule, sector: e.target.value as Sector})}
                 >
@@ -247,7 +301,7 @@ export const AdminPanel: React.FC = () => {
               <div>
                 <label className="text-xs font-semibold text-slate-500 uppercase">Modelo</label>
                 <select 
-                  className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900"
+                  className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none focus:border-blue-500"
                   value={newRule.model}
                   onChange={e => setNewRule({...newRule, model: e.target.value})}
                 >
@@ -258,7 +312,7 @@ export const AdminPanel: React.FC = () => {
               <div>
                 <label className="text-xs font-semibold text-slate-500 uppercase">Operación</label>
                 <select 
-                  className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900"
+                  className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none focus:border-blue-500"
                   value={newRule.operation}
                   onChange={e => setNewRule({...newRule, operation: e.target.value})}
                 >
@@ -271,19 +325,33 @@ export const AdminPanel: React.FC = () => {
                 <input 
                   type="number" 
                   step="0.1"
-                  className="w-full border border-slate-300 p-2 rounded font-bold text-orange-600 bg-white"
+                  className="w-full border border-slate-300 p-2 rounded font-bold text-slate-800 bg-white outline-none focus:border-blue-500"
                   value={newRule.pointsPerUnit}
                   onChange={e => setNewRule({...newRule, pointsPerUnit: parseFloat(e.target.value)})}
                 />
               </div>
-              <button 
-                onClick={handleAddRule}
-                disabled={loading}
-                type="button"
-                className="bg-orange-600 text-white font-bold py-2 px-4 rounded hover:bg-orange-700 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {loading ? <Loader2 className="animate-spin w-4 h-4"/> : <Plus className="w-4 h-4" />} Agregar
-              </button>
+              
+              <div className="flex gap-2">
+                {editingId && (
+                  <button 
+                    onClick={handleCancelEdit}
+                    type="button"
+                    className="bg-slate-200 text-slate-600 font-bold py-2 px-3 rounded hover:bg-slate-300"
+                    title="Cancelar Edición"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+                <button 
+                  onClick={handleSaveRule}
+                  disabled={loading}
+                  type="button"
+                  className={`${buttonColor} text-white font-bold py-2 px-4 rounded flex-1 flex items-center justify-center gap-2 disabled:opacity-50 transition-colors`}
+                >
+                  {loading ? <Loader2 className="animate-spin w-4 h-4"/> : (editingId ? <RefreshCw className="w-4 h-4" /> : <Plus className="w-4 h-4" />)} 
+                  {editingId ? 'Actualizar' : 'Agregar'}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -296,21 +364,30 @@ export const AdminPanel: React.FC = () => {
                   <th className="px-6 py-3">Modelo</th>
                   <th className="px-6 py-3">Operación</th>
                   <th className="px-6 py-3 text-right">Pts/Unidad</th>
-                  <th className="px-6 py-3 text-right">Acción</th>
+                  <th className="px-6 py-3 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {matrix.map((rule) => (
-                  <tr key={rule.id} className="hover:bg-slate-50">
+                  <tr key={rule.id} className={`hover:bg-slate-50 ${editingId === rule.id ? 'bg-blue-50' : ''}`}>
                     <td className="px-6 py-3 text-slate-700">{rule.sector}</td>
                     <td className="px-6 py-3 font-medium text-slate-800">{rule.model}</td>
                     <td className="px-6 py-3 text-slate-600">{rule.operation}</td>
                     <td className="px-6 py-3 text-right font-bold text-orange-600">{rule.pointsPerUnit}</td>
-                    <td className="px-6 py-3 text-right">
+                    <td className="px-6 py-3 text-center flex justify-center gap-2">
+                      <button 
+                        onClick={() => handleEditClick(rule)}
+                        type="button"
+                        className="text-slate-400 hover:text-blue-600 p-1 transition-colors"
+                        title="Editar Puntos"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
                       <button 
                         onClick={() => handleDeleteRule(rule.id)}
                         type="button"
-                        className="text-slate-400 hover:text-red-600 p-1"
+                        className="text-slate-400 hover:text-red-600 p-1 transition-colors"
+                        title="Eliminar"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
