@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { getOperators } from '../services/dataService';
+// 1. Importamos las funciones de autenticación de Firebase
+import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { ShieldCheck, HardHat, ArrowRight, Lock, Loader2 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -12,7 +14,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [selectedOperator, setSelectedOperator] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  
+   
   // Async State
   const [operators, setOperators] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,16 +32,31 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const handleOperatorLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedOperator) {
+      // El operario entra sin auth de Firebase (Público restringido por reglas)
       onLogin({ name: selectedOperator, role: 'operator' });
     }
   };
 
-  const handleAdminLogin = (e: React.FormEvent) => {
+  // 2. Modificamos esta función para usar Firebase real
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'admin123') {
+    setError('');
+    setLoading(true); // Reutilizamos el estado de loading para el feedback visual
+
+    const auth = getAuth();
+    // TRUCO: Email fijo oculto. El usuario solo escribe la password.
+    // ASEGÚRATE de crear este usuario en Firebase Console primero.
+    const emailOculto = "admin@topsafe.com"; 
+
+    try {
+      await signInWithEmailAndPassword(auth, emailOculto, password);
+      // Si no da error, el login fue exitoso
       onLogin({ name: 'Gerente Planta', role: 'admin' });
-    } else {
-      setError('Contraseña incorrecta');
+    } catch (err) {
+      console.error(err);
+      setError('Contraseña incorrecta o error de conexión');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -146,12 +163,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   placeholder="••••••"
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                  disabled={loading}
                 />
                 {error && <p className="text-red-500 text-xs mt-2 font-bold">{error}</p>}
               </div>
 
-              <button className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg transition-colors shadow-md shadow-orange-200">
-                ACCEDER AL DASHBOARD
+              {/* Agregué estado de loading al botón también */}
+              <button 
+                disabled={loading}
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg transition-colors shadow-md shadow-orange-200 flex justify-center items-center disabled:opacity-70"
+              >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "ACCEDER AL DASHBOARD"}
               </button>
               
               <button 
