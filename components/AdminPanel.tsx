@@ -149,32 +149,60 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
   };
 
-  // ... Función de Carga Masiva (NUEVA) ...
+  // ... Función de Carga Masiva (MEJORADA) ...
   const handleBulkImport = async () => {
     if (!jsonImport) return;
-    if (!window.confirm("¿Importar estos datos? Asegúrate que el formato sea correcto.")) return;
+    if (!window.confirm("¿Importar datos? Esto agregará reglas nuevas y actualizará las listas de modelos y operaciones.")) return;
 
     setImporting(true);
     try {
       const data = JSON.parse(jsonImport);
       if (!Array.isArray(data)) { alert("El formato debe ser una lista [...]"); return; }
 
-      let count = 0;
+      let addedCount = 0;
+      let skippedCount = 0;
+
+      // 1. Procesar Reglas de Puntos
       for (const item of data) {
         if (item.sector && item.model && item.operation && item.pointsPerUnit) {
-          // Normalizamos la mayúscula del sector por seguridad
           const formattedSector = item.sector.charAt(0).toUpperCase() + item.sector.slice(1).toLowerCase();
           
-          await addPointRule({
-            sector: formattedSector as Sector,
-            model: item.model.toString(),
-            operation: item.operation,
-            pointsPerUnit: Number(item.pointsPerUnit)
-          });
-          count++;
+          // Verificar si ya existe para no duplicar
+          const exists = matrix.some(r => 
+            r.sector === formattedSector && 
+            r.model === item.model.toString() && 
+            r.operation === item.operation
+          );
+
+          if (!exists) {
+            await addPointRule({
+              sector: formattedSector as Sector,
+              model: item.model.toString(),
+              operation: item.operation,
+              pointsPerUnit: Number(item.pointsPerUnit)
+            });
+            addedCount++;
+          } else {
+            skippedCount++;
+          }
         }
       }
-      alert(`¡Éxito! Se cargaron ${count} reglas.`);
+
+      // 2. Actualizar Catálogos (Listas) Automáticamente
+      // Extraemos modelos y operaciones únicos del JSON
+      const jsonModels = data.map((i: any) => i.model.toString());
+      const jsonOperations = data.map((i: any) => i.operation);
+
+      // Combinamos con los que ya existían para no borrar nada
+      const updatedModels = Array.from(new Set([...models, ...jsonModels])).sort();
+      const updatedOperations = Array.from(new Set([...operations, ...jsonOperations])).sort();
+
+      // Guardamos en Firebase
+      await saveModels(updatedModels);
+      await saveOperations(updatedOperations);
+
+      alert(`Proceso finalizado:\n- Reglas agregadas: ${addedCount}\n- Reglas omitidas (ya existían): ${skippedCount}\n- Catálogos actualizados correctamente.`);
+      
       setJsonImport('');
       await loadData();
     } catch (e) {
@@ -303,7 +331,7 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {/* --- PESTAÑA CARGA MASIVA (AGREGADA AHORA) --- */}
+      {/* --- PESTAÑA CARGA MASIVA --- */}
       {activeTab === 'import' && (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
           <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -324,7 +352,7 @@ export const AdminPanel: React.FC = () => {
             className="mt-4 bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 disabled:opacity-50 w-full flex justify-center items-center gap-2"
           >
             {importing ? <Loader2 className="animate-spin w-5 h-5"/> : <Upload className="w-5 h-5"/>} 
-            {importing ? 'Procesando...' : 'IMPORTAR DATOS AHORA'}
+            {importing ? 'Procesando...' : 'IMPORTAR DATOS Y ACTUALIZAR LISTAS'}
           </button>
         </div>
       )}
