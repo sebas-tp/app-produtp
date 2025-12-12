@@ -92,6 +92,15 @@ export const getPointRuleSync = (matrix: PointRule[], sector: Sector, model: str
     (r) => r.sector === sector && r.model === model && r.operation === operation
   );
 };
+// Agrega esto en services/dataService.ts
+
+export const updateProductionLog = async (log: ProductionLog): Promise<void> => {
+  const { id, ...logData } = log;
+  // Referencia al documento específico por su ID
+  const docRef = doc(db, 'production_logs', id); 
+  await updateDoc(docRef, logData);
+};
+
 
 // --- LOGGING PERSISTENCE (Async) ---
 
