@@ -95,6 +95,15 @@ export const deletePointRule = async (id: string) => {
   await deleteDoc(doc(db, 'points_matrix', id));
 }
 
+// Agrega esto en services/dataService.ts
+
+export const updatePointRule = async (rule: PointRule) => {
+  const { id, ...data } = rule;
+  // Referencia al documento exacto por su ID
+  const docRef = doc(db, 'points_matrix', id);
+  await updateDoc(docRef, data);
+}
+
 // --- BUSINESS LOGIC (Hybrid) ---
 
 export const calculatePointsSync = (matrix: PointRule[], sector: Sector, model: string, operation: string, quantity: number): number => {
