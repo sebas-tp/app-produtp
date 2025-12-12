@@ -70,7 +70,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           <h1 className="text-3xl font-black tracking-tight mb-2 text-white uppercase italic">
             Producción <span className="text-amber-500">TopSafe</span>
           </h1>
-          <p className="text-slate-400 text-sm font-medium">Gestión Industrial Segura</p>
+          <p className="text-slate-400 text-sm font-medium">App Producción </p>
         </div>
 
         <div className="p-8">
