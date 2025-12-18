@@ -1,420 +1,394 @@
-import React, { useEffect, useState } from 'react';
-import { getLogs, clearLogs, downloadCSV, downloadPDF, getProductivityTarget, saveProductivityTarget, getOperators } from '../services/dataService';
+import React, { useState, useEffect } from 'react';
+import { getProductionLogs, getOperators } from '../services/dataService';
 import { ProductionLog } from '../types';
 import { 
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
+  PieChart, Pie, Cell 
 } from 'recharts';
-import { Trash2, BrainCircuit, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, Pencil, Save, Trophy, Users, TrendingUp, Box } from 'lucide-react';
-import { analyzeProductionData } from '../services/geminiService';
-import ReactMarkdown from 'react-markdown';
+import { Activity, Users, TrendingUp, Box, BrainCircuit, X, Loader2, FileText, Lock, ShieldCheck } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { analyzeProductionData } from '../services/aiService';
 
-export const ManagerDashboard: React.FC = () => {
-  const [allLogs, setAllLogs] = useState<ProductionLog[]>([]); 
-  const [filteredLogs, setFilteredLogs] = useState<ProductionLog[]>([]); 
-  const [operatorList, setOperatorList] = useState<string[]>([]);
+export const Dashboard: React.FC = () => {
+  // --- ESTADOS DE DATOS ---
+  const [logs, setLogs] = useState<ProductionLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [operators, setOperators] = useState<string[]>([]);
   
-  // --- FILTROS ---
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7); // Últimos 7 días por defecto
-    return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [selectedOperator, setSelectedOperator] = useState<string>('all'); // 'all' o nombre del operario
+  // --- ESTADOS DE FILTRO ---
+  const [dateRange, setDateRange] = useState('today');
+  const [selectedOperator, setSelectedOperator] = useState('all');
 
-  // --- META ---
-  const [dailyTarget, setDailyTarget] = useState<number>(24960);
-  const [isEditingTarget, setIsEditingTarget] = useState(false);
-  const [tempTarget, setTempTarget] = useState<string>("24960");
+  // --- ESTADOS DE IA Y PDF ---
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
 
-  // --- IA ---
-  const [analysis, setAnalysis] = useState<string>('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // --- ESTADOS DE SEGURIDAD (CANDADO) ---
+  const [isAuthorized, setIsAuthorized] = useState(false); // ¿Ya puso la clave?
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [pendingAction, setPendingAction] = useState<'ai' | 'pdf' | null>(null);
 
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      const [logs, target, ops] = await Promise.all([
-        getLogs(),
-        getProductivityTarget(),
-        getOperators()
-      ]);
-      setAllLogs(logs);
-      setDailyTarget(target);
-      setTempTarget(target.toString());
-      setOperatorList(ops);
-      setLoading(false);
-    };
-    init();
-  }, []);
+  // CLAVE MAESTRA (¡Cámbiala aquí por la que quieras!)
+  const MASTER_PASSWORD = "Ing.2026"; 
 
-  useEffect(() => {
-    applyFilters();
-  }, [allLogs, startDate, endDate, selectedOperator]);
+  useEffect(() => { loadData(); }, [dateRange]);
 
-  const refreshData = async () => {
+  const loadData = async () => {
     setLoading(true);
-    const logs = await getLogs();
-    setAllLogs(logs);
-    setLoading(false);
+    try {
+      const allLogs = await getProductionLogs(); 
+      const ops = await getOperators();
+      
+      const now = new Date();
+      let filtered = allLogs;
+      
+      if (dateRange === 'today') {
+        const todayStr = now.toISOString().split('T')[0];
+        filtered = allLogs.filter(l => l.date.startsWith(todayStr));
+      } 
+      setLogs(filtered);
+      setOperators(ops);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const applyFilters = () => {
-    const filtered = allLogs.filter(log => {
-      const logDate = log.timestamp.split('T')[0];
-      const dateMatch = logDate >= startDate && logDate <= endDate;
-      const operatorMatch = selectedOperator === 'all' || log.operatorName === selectedOperator;
-      return dateMatch && operatorMatch;
-    });
-    setFilteredLogs(filtered);
-  };
+  const displayLogs = selectedOperator === 'all' 
+    ? logs 
+    : logs.filter(l => l.operator === selectedOperator);
 
-  const handleSaveTarget = async () => {
-    const newVal = parseInt(tempTarget);
-    if (!isNaN(newVal) && newVal > 0) {
-      await saveProductivityTarget(newVal);
-      setDailyTarget(newVal);
-      setIsEditingTarget(false);
-      refreshData(); 
+  // --- CÁLCULOS KPI ---
+  const totalPoints = displayLogs.reduce((acc, curr) => acc + curr.points, 0);
+  const totalUnits = displayLogs.reduce((acc, curr) => acc + curr.quantity, 0);
+  const activeOperators = new Set(displayLogs.map(l => l.operator)).size;
+  const averageEfficiency = activeOperators ? Math.round((totalPoints / activeOperators / 800) * 100) : 0;
+
+  // --- DATOS GRÁFICOS ---
+  const modelData = Object.entries(displayLogs.reduce((acc: any, curr) => {
+    acc[curr.model] = (acc[curr.model] || 0) + curr.quantity;
+    return acc;
+  }, {})).map(([name, value]) => ({ name, value })).sort((a: any, b: any) => b.value - a.value).slice(0, 5);
+
+  const sectorData = Object.entries(displayLogs.reduce((acc: any, curr) => {
+    acc[curr.sector] = (acc[curr.sector] || 0) + curr.points;
+    return acc;
+  }, {})).map(([name, value]) => ({ name, value }));
+
+  const COLORS = ['#ea580c', '#0ea5e9', '#22c55e', '#eab308', '#8b5cf6'];
+
+  // --- SISTEMA DE SEGURIDAD ---
+  const requestAccess = (action: 'ai' | 'pdf') => {
+    if (isAuthorized) {
+      // Si ya está autorizado, ejecutamos directo
+      if (action === 'ai') executeAnalysis();
+      if (action === 'pdf') executeExportPDF();
     } else {
-      alert("Ingrese un número válido mayor a 0");
+      // Si no, pedimos clave
+      setPendingAction(action);
+      setShowAuthModal(true);
     }
   };
 
-  const handleClearData = async () => {
-    if (window.confirm("¡PELIGRO! ¿Está seguro de eliminar TODOS los registros históricos? Esta acción no se puede deshacer.")) {
-      setLoading(true);
-      await clearLogs();
-      await refreshData();
+  const verifyPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordInput === MASTER_PASSWORD) {
+      setIsAuthorized(true); // ¡Desbloqueado para esta sesión!
+      setShowAuthModal(false);
+      setPasswordInput('');
+      
+      // Ejecutar lo que quería hacer
+      if (pendingAction === 'ai') executeAnalysis();
+      if (pendingAction === 'pdf') executeExportPDF();
+    } else {
+      alert("⚠️ Contraseña incorrecta. Acceso denegado a Ingeniería.");
     }
   };
 
-  const handleDownloadExcel = () => {
-    const filename = `Reporte_${selectedOperator === 'all' ? 'Global' : selectedOperator}_${startDate}_al_${endDate}`;
-    downloadCSV(filteredLogs, filename);
-  };
-
-  const handleDownloadPDF = () => {
-    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
-    const filename = `Reporte_${startDate}_al_${endDate}`;
-    downloadPDF(filteredLogs, title, filename);
-  };
-
-  const handleAnalyze = async () => {
-    setIsAnalyzing(true);
-    const result = await analyzeProductionData(filteredLogs);
-    setAnalysis(result);
-    setIsAnalyzing(false);
-  };
-
-  // --- PREPARACIÓN DE DATOS PARA GRÁFICOS ---
-
-  // 1. Puntos por Operario (Solo visible en modo Global)
-  const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
-    if (!acc[log.operatorName]) {
-      acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
+  // --- LÓGICA DE ACCIONES ---
+  const executeAnalysis = async () => {
+    setAnalyzing(true);
+    setShowAnalysisModal(true);
+    try {
+      const result = await analyzeProductionData(displayLogs, operators, totalPoints);
+      setAnalysisResult(result);
+    } catch (error) {
+      setAnalysisResult("Error de conexión con IA.");
+    } finally {
+      setAnalyzing(false);
     }
-    acc[log.operatorName].points += log.totalPoints;
-    acc[log.operatorName].quantity += log.quantity;
-    return acc;
-  }, {} as Record<string, { name: string; points: number; quantity: number }>))
-  .map(stat => ({ ...stat, percentage: (stat.points / dailyTarget) * 100 }))
-  .sort((a, b) => b.points - a.points);
+  };
 
-  // 2. Producción por Sector (Pie Chart)
-  const countBySector = Object.values(filteredLogs.reduce((acc, log) => {
-    if (!acc[log.sector]) acc[log.sector] = { name: log.sector, value: 0 };
-    acc[log.sector].value += log.quantity;
-    return acc;
-  }, {} as Record<string, { name: string; value: number }>));
-
-  // 3. TENDENCIA DIARIA (Line Chart) - NUEVO
-  const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
-    const date = log.timestamp.split('T')[0]; // Agrupar por fecha 'YYYY-MM-DD'
-    // Formatear fecha corta DD/MM
-    const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
+  const executeExportPDF = () => {
+    const doc = new jsPDF();
+    const dateStr = new Date().toLocaleDateString();
     
-    if (!acc[date]) acc[date] = { fullDate: date, name: shortDate, points: 0, quantity: 0 };
-    acc[date].points += log.totalPoints;
-    acc[date].quantity += log.quantity;
-    return acc;
-  }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
-  .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
+    // Título
+    doc.setFontSize(18);
+    doc.text("Reporte Gerencial - TopSafe", 14, 20);
+    doc.setFontSize(12);
+    doc.text(`Fecha: ${dateStr} | Autorizado: Ingeniería`, 14, 28);
+    
+    // Resumen KPI
+    doc.setDrawColor(200);
+    doc.line(14, 32, 196, 32);
+    doc.text(`Puntos Totales: ${totalPoints} | Unidades: ${totalUnits} | Eficiencia: ${averageEfficiency}%`, 14, 40);
 
-  // 4. TOP MODELOS (Bar Chart Horizontal) - NUEVO
-  const modelStats = Object.values(filteredLogs.reduce((acc, log) => {
-    if (!acc[log.model]) acc[log.model] = { name: log.model, value: 0 };
-    acc[log.model].value += log.quantity;
-    return acc;
-  }, {} as Record<string, { name: string; value: number }>))
-  .sort((a, b) => b.value - a.value)
-  .slice(0, 5); // Top 5 modelos
+    let startY = 50;
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
+    // INCLUIR ANÁLISIS DE IA (Si existe)
+    if (analysisResult) {
+      doc.setFontSize(14);
+      doc.setTextColor(234, 88, 12); // Naranja
+      doc.text("Análisis de Inteligencia Artificial (Gemini)", 14, startY);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(0); // Negro
+      // Limpiamos un poco el markdown para que se vea bien en PDF
+      const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/>/g, '');
+      const splitText = doc.splitTextToSize(cleanText, 180); // Ajustar texto al ancho
+      doc.text(splitText, 14, startY + 8);
+      
+      // Calculamos dónde terminó el texto para empezar la tabla
+      startY += 10 + (splitText.length * 5);
+    }
 
-  if (loading && allLogs.length === 0) {
-    return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>
-  }
+    // TABLA DE DATOS
+    autoTable(doc, {
+      startY: startY + 5,
+      head: [['Hora', 'Operario', 'Sector', 'Modelo', 'Operación', 'Cant', 'Pts']],
+      body: displayLogs.map(l => [
+        new Date(l.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+        l.operator,
+        l.sector,
+        l.model,
+        l.operation,
+        l.quantity,
+        l.points
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: [234, 88, 12] } // Naranja corporativo
+    });
+
+    doc.save(`Reporte_TopSafe_${dateStr.replace(/\//g, '-')}.pdf`);
+  };
 
   return (
-    <div className="space-y-8 p-4 md:p-8">
-      {/* Header and Controls */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+    <div className="space-y-6 pb-20">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <div>
-           <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
-           <p className="text-slate-500 text-sm">Resumen de producción y métricas</p>
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+            Dashboard Gerencial
+            {isAuthorized && <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full border border-green-200 flex items-center gap-1"><ShieldCheck className="w-3 h-3"/> Acceso Ingeniería</span>}
+          </h2>
+          <p className="text-slate-500 text-sm">Visión general de la planta en tiempo real.</p>
         </div>
+        <div className="flex gap-2">
+           <select 
+             className="bg-slate-50 border border-slate-300 rounded-lg text-sm p-2 outline-none"
+             value={dateRange} onChange={(e) => setDateRange(e.target.value)}
+           >
+             <option value="today">Hoy</option>
+           </select>
+           
+           {/* BOTÓN IA CON CANDADO */}
+           <button 
+             onClick={() => requestAccess('ai')}
+             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${isAuthorized ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-md' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+           >
+             {isAuthorized ? <BrainCircuit className="w-5 h-5" /> : <Lock className="w-4 h-4"/>} 
+             Análisis IA
+           </button>
 
-        <div className="flex flex-col md:flex-row gap-4 items-center w-full xl:w-auto flex-wrap">
-          
-          {/* SELECTOR DE OPERARIO */}
-          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
-             <Users className="w-4 h-4 text-slate-500" />
-             <select 
-                value={selectedOperator}
-                onChange={(e) => setSelectedOperator(e.target.value)}
-                className="bg-transparent text-sm outline-none text-slate-700 font-medium"
-             >
-                <option value="all">Vista Global (Todos)</option>
-                <option disabled>──────────</option>
-                {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
-             </select>
+           {/* BOTÓN PDF CON CANDADO */}
+           <button 
+             onClick={() => requestAccess('pdf')}
+             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${isAuthorized ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
+           >
+             {isAuthorized ? <FileText className="w-5 h-5" /> : <Lock className="w-4 h-4"/>} 
+             PDF
+           </button>
+        </div>
+      </div>
+
+      {/* --- TARJETAS KPI (Igual que antes) --- */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-orange-500">
+          <div className="flex justify-between">
+            <div>
+              <p className="text-slate-400 text-xs uppercase font-bold">Puntos Totales</p>
+              <h3 className="text-2xl font-bold text-slate-800">{totalPoints.toLocaleString()}</h3>
+            </div>
+            <TrendingUp className="text-orange-500 w-8 h-8 opacity-20" />
           </div>
-
-          {/* Date Filter */}
-          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
-             <Calendar className="w-4 h-4 text-slate-500" />
-             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
-             <span className="text-slate-400">-</span>
-             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-500">
+          <div className="flex justify-between">
+            <div>
+              <p className="text-slate-400 text-xs uppercase font-bold">Unidades Prod.</p>
+              <h3 className="text-2xl font-bold text-slate-800">{totalUnits.toLocaleString()}</h3>
+            </div>
+            <Box className="text-blue-500 w-8 h-8 opacity-20" />
           </div>
-
-          <div className="flex gap-2 w-full md:w-auto">
-             <button onClick={handleDownloadExcel} className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors" title="Descargar Excel">
-              <FileDown className="w-4 h-4" /> Excel
-            </button>
-             <button onClick={handleDownloadPDF} className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors" title="Descargar PDF">
-              <FileText className="w-4 h-4" /> PDF
-            </button>
-            <button onClick={refreshData} className="p-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50" title="Actualizar Datos">
-               <RefreshCw className="w-5 h-5 text-slate-600" />
-            </button>
-            <button onClick={handleClearData} className="p-2 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 text-red-600" title="Borrar Historial">
-               <Trash2 className="w-5 h-5" />
-            </button>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-green-500">
+          <div className="flex justify-between">
+            <div>
+              <p className="text-slate-400 text-xs uppercase font-bold">Operarios Activos</p>
+              <h3 className="text-2xl font-bold text-slate-800">{activeOperators}/{operators.length}</h3>
+            </div>
+            <Users className="text-green-500 w-8 h-8 opacity-20" />
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-purple-500">
+          <div className="flex justify-between">
+            <div>
+              <p className="text-slate-400 text-xs uppercase font-bold">Eficiencia Planta</p>
+              <h3 className="text-2xl font-bold text-slate-800">{averageEfficiency}%</h3>
+            </div>
+            <Activity className="text-purple-500 w-8 h-8 opacity-20" />
           </div>
         </div>
       </div>
 
-      {/* KPI Cards Row 1 */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {/* Tarjeta META */}
-        <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
-          <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-              <Target className="w-4 h-4 text-amber-500" /> Meta Diaria
-            </p>
-            {!isEditingTarget ? (
-              <button onClick={() => setIsEditingTarget(true)} className="text-slate-400 hover:text-white transition-colors">
-                <Pencil className="w-4 h-4" />
-              </button>
-            ) : (
-              <button onClick={handleSaveTarget} className="text-emerald-400 hover:text-emerald-300 transition-colors">
-                <Save className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          {isEditingTarget ? (
-            <div className="flex items-center gap-2 mt-1">
-              <input type="number" value={tempTarget} onChange={(e) => setTempTarget(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xl font-bold w-full text-white outline-none focus:border-amber-500" autoFocus />
-            </div>
-          ) : (
-            <p className="text-3xl font-black mt-1 tracking-tight">{dailyTarget.toLocaleString()} <span className="text-sm font-normal text-slate-400">pts</span></p>
-          )}
-          <p className="text-xs text-slate-500 mt-2">Objetivo base para cálculo de eficiencia.</p>
-        </div>
-
-        {/* KPIs Dinámicos */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium uppercase">Producción Total (u)</p>
-          <p className="text-3xl font-bold text-slate-800 mt-2">
-            {filteredLogs.reduce((sum, log) => sum + log.quantity, 0).toLocaleString()}
-          </p>
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium uppercase">Puntos Generados</p>
-          <p className="text-3xl font-bold text-blue-600 mt-2">
-            {filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0).toFixed(1)}
-          </p>
-          {selectedOperator !== 'all' && (
-             <p className="text-xs text-slate-400 mt-1">
-               {((filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0) / dailyTarget) * 100).toFixed(1)}% de la meta diaria
-             </p>
-          )}
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <p className="text-sm text-slate-500 font-medium uppercase">Registros</p>
-          <p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* 1. Tabla de Eficiencia (Solo en vista GLOBAL) */}
-        {selectedOperator === 'all' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
-            <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-amber-500" /> Cumplimiento
-            </h3>
-            <div className="overflow-y-auto flex-1 pr-2 space-y-3">
-               {operatorStats.map((stat) => (
-                 <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                   <div className="flex justify-between items-center mb-1">
-                     <span className="font-bold text-slate-700">{stat.name}</span>
-                     {stat.percentage >= 100 ? (
-                       <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold border border-green-200">¡CUMPLIDO!</span>
-                     ) : (
-                       <span className="text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full font-bold border border-orange-100">EN PROCESO</span>
-                     )}
-                   </div>
-                   <div className="flex justify-between items-end text-sm mb-1">
-                     <span className="text-slate-500">{stat.points.toFixed(0)} pts</span>
-                     <span className={`font-black ${stat.percentage >= 100 ? 'text-green-600' : 'text-slate-600'}`}>
-                       {stat.percentage.toFixed(1)}%
-                     </span>
-                   </div>
-                   <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                      <div className={`h-full ${stat.percentage >= 100 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div>
-                   </div>
-                 </div>
-               ))}
-               {operatorStats.length === 0 && <div className="text-center text-slate-400 py-8 text-sm italic">Sin datos.</div>}
-            </div>
-          </div>
-        )}
-
-        {/* 2. Gráfico de TENDENCIA (Línea) - Siempre visible, ocupa más espacio si es individual */}
-        <div className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 ${selectedOperator === 'all' ? 'lg:col-span-2' : 'lg:col-span-2'}`}>
-          <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-blue-600"/> 
-            Evolución Diaria de Puntos
-          </h3>
+      {/* --- GRÁFICOS --- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
+          <h3 className="font-bold text-slate-700 mb-4">Producción por Sector</h3>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={dailyTrend}>
+            <BarChart data={sectorData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" tick={{fontSize: 12}} />
-              <YAxis />
+              <XAxis dataKey="name" fontSize={12} />
+              <YAxis fontSize={12} />
               <Tooltip />
-              <Legend />
-              <Line type="monotone" dataKey="points" name="Puntos Totales" stroke="#2563eb" strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
-              {selectedOperator === 'all' && <Line type="monotone" dataKey="quantity" name="Unidades" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" />}
-            </LineChart>
+              <Bar dataKey="value" fill="#ea580c" radius={[4, 4, 0, 0]} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* 3. Gráfico de TOP MODELOS (Barras) - Ocupa el espacio lateral si estamos filtrando */}
-        {selectedOperator !== 'all' && (
-           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 h-96">
-             <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2">
-               <Box className="w-5 h-5 text-purple-600"/> 
-               Top 5 Modelos
-             </h3>
-             <ResponsiveContainer width="100%" height="100%">
-               <BarChart data={modelStats} layout="vertical">
-                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false}/>
-                 <XAxis type="number" hide />
-                 <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} />
-                 <Tooltip />
-                 <Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} name="Unidades" label={{ position: 'right', fill: '#666', fontSize: 10 }} />
-               </BarChart>
-             </ResponsiveContainer>
-           </div>
-        )}
-      </div>
-
-      {/* Charts Row 2 - Distribución por Sector */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm h-80">
-          <h3 className="text-md font-semibold text-slate-700 mb-4">Producción por Sector</h3>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
+          <h3 className="font-bold text-slate-700 mb-4">Top 5 Modelos</h3>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={countBySector} cx="50%" cy="50%" innerRadius={60} outerRadius={80} fill="#8884d8" paddingAngle={5} dataKey="value">
-                {countBySector.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+              <Pie data={modelData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                {modelData.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}
               </Pie>
               <Tooltip />
-              <Legend verticalAlign="middle" align="right" layout="vertical" />
+              <Legend verticalAlign="bottom" height={36}/>
             </PieChart>
           </ResponsiveContainer>
         </div>
-        
-        {/* Si estamos en GLOBAL, mostramos la comparativa de Operarios en Barras */}
-        {selectedOperator === 'all' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm h-80">
-            <h3 className="text-md font-semibold text-slate-700 mb-4">Comparativa Puntos por Operario</h3>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={operatorStats.slice(0, 10) /* Top 10 para no saturar */}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{fontSize: 11}} interval={0} />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="points" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Puntos" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
       </div>
 
-      {/* AI Analysis Section */}
-      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-xl border border-indigo-100">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
-            <BrainCircuit className="w-6 h-6" /> IA Plant Manager
-          </h3>
-          <button onClick={handleAnalyze} disabled={isAnalyzing || filteredLogs.length === 0} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-            {isAnalyzing ? 'Analizando...' : 'Generar Reporte Inteligente'}
-          </button>
-        </div>
-        {analysis ? (
-          <div className="prose prose-sm prose-indigo max-w-none bg-white p-4 rounded-lg shadow-sm"><ReactMarkdown>{analysis}</ReactMarkdown></div>
-        ) : (
-          <p className="text-indigo-400 text-sm italic">{filteredLogs.length === 0 ? "No hay datos en el rango seleccionado." : "Presione el botón para detectar ineficiencias automáticamente."}</p>
-        )}
-      </div>
-
-      {/* Data Table */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-          <h3 className="font-semibold text-slate-800">Detalle de Registros ({selectedOperator === 'all' ? 'Todos' : selectedOperator})</h3>
+      {/* --- TABLA DETALLADA --- */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+           <h3 className="font-bold text-slate-700">Registros Recientes</h3>
+           <select 
+             className="text-sm border border-slate-300 rounded p-1"
+             value={selectedOperator}
+             onChange={(e) => setSelectedOperator(e.target.value)}
+           >
+             <option value="all">Todos los operarios</option>
+             {operators.map(op => <option key={op} value={op}>{op}</option>)}
+           </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left text-slate-600">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50">
-              <tr>
-                <th className="px-6 py-3">Fecha</th>
-                <th className="px-6 py-3">Operario</th>
-                <th className="px-6 py-3">Sector</th>
-                <th className="px-6 py-3">Modelo</th>
-                <th className="px-6 py-3 text-right">Cant.</th>
-                <th className="px-6 py-3 text-right">Puntos</th>
-              </tr>
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
+              <tr><th className="px-6 py-3">Hora</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Sector</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Cant.</th><th className="px-6 py-3 text-right">Pts</th></tr>
             </thead>
-            <tbody>
-              {filteredLogs.slice(0, 50).map((log) => (
-                <tr key={log.id} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-6 py-4 font-medium">{new Date(log.timestamp).toLocaleDateString()}</td>
-                  <td className="px-6 py-4">{log.operatorName}</td>
-                  <td className="px-6 py-4"><span className="px-2 py-1 bg-slate-100 rounded text-xs font-semibold">{log.sector}</span></td>
-                  <td className="px-6 py-4">{log.model} - {log.operation}</td>
-                  <td className="px-6 py-4 text-right font-bold">{log.quantity}</td>
-                  <td className="px-6 py-4 text-right text-blue-600 font-bold">{log.totalPoints.toFixed(1)}</td>
+            <tbody className="divide-y divide-slate-100">
+              {displayLogs.slice(0, 10).map((log) => (
+                <tr key={log.id} className="hover:bg-slate-50">
+                  <td className="px-6 py-3 text-slate-500">{new Date(log.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                  <td className="px-6 py-3 font-medium text-slate-800">{log.operator}</td>
+                  <td className="px-6 py-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${log.sector === 'Corte' ? 'bg-blue-100 text-blue-700' : log.sector === 'Costura' ? 'bg-purple-100 text-purple-700' : 'bg-orange-100 text-orange-700'}`}>{log.sector}</span></td>
+                  <td className="px-6 py-3 text-slate-600 truncate max-w-xs">{log.model} - {log.operation}</td>
+                  <td className="px-6 py-3 text-right font-bold">{log.quantity}</td>
+                  <td className="px-6 py-3 text-right text-green-600 font-bold">+{log.points.toFixed(1)}</td>
                 </tr>
               ))}
-              {filteredLogs.length === 0 && <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">No se encontraron registros.</td></tr>}
+              {displayLogs.length === 0 && <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">No hay registros hoy.</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* --- MODAL PASSWORD (Seguridad) --- */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="bg-slate-900 p-6 text-white text-center">
+              <Lock className="w-10 h-10 mx-auto mb-2 text-orange-500" />
+              <h3 className="text-lg font-bold">Acceso Restringido</h3>
+              <p className="text-slate-400 text-xs">Área exclusiva de Ingeniería</p>
+            </div>
+            <form onSubmit={verifyPassword} className="p-6">
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Contraseña</label>
+              <input 
+                type="password" 
+                autoFocus
+                className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-orange-500 mb-4 font-mono text-center tracking-widest"
+                placeholder="••••••"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowAuthModal(false)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-200">Cancelar</button>
+                <button type="submit" className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-bold hover:bg-orange-700">Desbloquear</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL ANÁLISIS IA --- */}
+      {showAnalysisModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-6 flex justify-between items-center text-white">
+              <div className="flex items-center gap-3">
+                <BrainCircuit className="w-8 h-8" />
+                <div>
+                  <h3 className="text-xl font-bold">Gemini AI - Análisis</h3>
+                  <p className="text-indigo-100 text-xs">Reporte Inteligente TopSafe</p>
+                </div>
+              </div>
+              {!analyzing && <button onClick={() => setShowAnalysisModal(false)} className="bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors"><X className="w-5 h-5" /></button>}
+            </div>
+            
+            <div className="p-8 max-h-[70vh] overflow-y-auto">
+              {analyzing ? (
+                <div className="flex flex-col items-center justify-center py-10 text-slate-500">
+                  <Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" />
+                  <p className="text-lg font-medium animate-pulse">Consultando a Gemini...</p>
+                </div>
+              ) : (
+                <div className="prose prose-slate max-w-none">
+                  <div className="whitespace-pre-wrap text-slate-700 text-sm leading-relaxed font-medium">
+                    {analysisResult}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {!analyzing && (
+              <div className="bg-slate-50 p-4 flex justify-end gap-3">
+                 <button onClick={executeExportPDF} className="flex items-center gap-2 text-slate-600 hover:text-slate-900 px-4 py-2 font-semibold">
+                   <FileText className="w-4 h-4"/> Descargar este Reporte en PDF
+                 </button>
+                <button onClick={() => setShowAnalysisModal(false)} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700">Cerrar</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
