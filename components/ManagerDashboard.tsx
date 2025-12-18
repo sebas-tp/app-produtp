@@ -1,19 +1,23 @@
 import React, { useEffect, useState } from 'react';
-// Usamos tus imports originales de servicios
-import { getLogs, clearLogs, downloadCSV, getProductivityTarget, saveProductivityTarget, getOperators } from '../services/dataService';
-// Importamos el nuevo servicio de IA (asegúrate que el archivo exista en services/geminiService.ts)
+import { 
+  getLogs, clearLogs, downloadCSV, downloadPDF, 
+  getProductivityTarget, saveProductivityTarget, getOperators 
+} from '../services/dataService';
+// Importamos el servicio con el nombre correcto que tienes ahora
 import { analyzeProductionData } from '../services/geminiService';
 import { ProductionLog } from '../types';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts';
-// Agregamos íconos de seguridad
-import { Trash2, BrainCircuit, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, Pencil, Save, Trophy, Users, TrendingUp, Box, Lock, ShieldCheck, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { 
+  Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
+  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck 
+} from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export const ManagerDashboard: React.FC = () => {
+  // --- ESTADOS DE DATOS (Tu lógica original) ---
   const [allLogs, setAllLogs] = useState<ProductionLog[]>([]); 
   const [filteredLogs, setFilteredLogs] = useState<ProductionLog[]>([]); 
   const [operatorList, setOperatorList] = useState<string[]>([]);
@@ -33,26 +37,23 @@ export const ManagerDashboard: React.FC = () => {
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [tempTarget, setTempTarget] = useState<string>("24960");
 
-  // --- SEGURIDAD (CANDADO) ---
-  const [isAuthorized, setIsAuthorized] = useState(false);
+  // --- NUEVO: ESTADOS DE SEGURIDAD E IA ---
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
-  const [pendingAction, setPendingAction] = useState<'ai' | 'pdf' | null>(null);
-  const MASTER_PASSWORD = "Ing.2026"; // <--- ¡CAMBIA ESTA CONTRASEÑA!
-
-  // --- IA Y MODAL ---
-  const [analysisResult, setAnalysisResult] = useState<string>('');
+  const [isAuthorized, setIsAuthorized] = useState(false); // Si ya puso la clave en esta sesión
+  const [showEngineeringModal, setShowEngineeringModal] = useState(false); // El modal de IA
+  const [analysisResult, setAnalysisResult] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
 
+  const MASTER_PASSWORD = "Ing.2026"; // <--- TU CONTRASEÑA DE INGENIERÍA
+
+  // --- CARGA INICIAL ---
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       try {
         const [logs, target, ops] = await Promise.all([
-          getLogs(),
-          getProductivityTarget(),
-          getOperators()
+          getLogs(), getProductivityTarget(), getOperators()
         ]);
         setAllLogs(logs);
         setDailyTarget(target || 24960);
@@ -76,7 +77,9 @@ export const ManagerDashboard: React.FC = () => {
   const applyFilters = () => {
     const filtered = allLogs.filter(log => {
       const logDate = log.timestamp.split('T')[0];
-      return logDate >= startDate && logDate <= endDate && (selectedOperator === 'all' || log.operatorName === selectedOperator);
+      const dateMatch = logDate >= startDate && logDate <= endDate;
+      const operatorMatch = selectedOperator === 'all' || log.operatorName === selectedOperator;
+      return dateMatch && operatorMatch;
     });
     setFilteredLogs(filtered);
   };
@@ -87,6 +90,7 @@ export const ManagerDashboard: React.FC = () => {
       await saveProductivityTarget(newVal);
       setDailyTarget(newVal);
       setIsEditingTarget(false);
+      refreshData(); 
     }
   };
 
@@ -98,13 +102,25 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  // --- SISTEMA DE SEGURIDAD ---
-  const requestAccess = (action: 'ai' | 'pdf') => {
+  // --- TUS EXPORTACIONES ORIGINALES (Botones Normales) ---
+  const handleDownloadExcel = () => {
+    const filename = `Reporte_${selectedOperator === 'all' ? 'Global' : selectedOperator}_${startDate}_al_${endDate}`;
+    downloadCSV(filteredLogs, filename);
+  };
+
+  const handleDownloadStandardPDF = () => {
+    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
+    const filename = `Reporte_${startDate}_al_${endDate}`;
+    downloadPDF(filteredLogs, title, filename);
+  };
+
+  // --- LÓGICA DE INGENIERÍA / IA ---
+  const handleEngineeringAccess = () => {
     if (isAuthorized) {
-      if (action === 'ai') executeAnalysis();
-      if (action === 'pdf') executeExportPDF();
+      // Si ya autorizó antes, entra directo
+      openEngineeringModal();
     } else {
-      setPendingAction(action);
+      // Si no, pide clave
       setShowAuthModal(true);
     }
   };
@@ -115,76 +131,83 @@ export const ManagerDashboard: React.FC = () => {
       setIsAuthorized(true);
       setShowAuthModal(false);
       setPasswordInput('');
-      if (pendingAction === 'ai') executeAnalysis();
-      if (pendingAction === 'pdf') executeExportPDF();
+      openEngineeringModal();
     } else {
-      alert("Contraseña incorrecta.");
+      alert("Acceso denegado.");
     }
   };
 
-  // --- ACCIONES PROTEGIDAS ---
-  const executeAnalysis = async () => {
-    setIsAnalyzing(true);
-    setShowAnalysisModal(true);
-    // Calculamos el total de puntos filtrados
-    const totalPoints = filteredLogs.reduce((acc, curr) => acc + curr.totalPoints, 0);
-    const result = await analyzeProductionData(filteredLogs, operatorList, totalPoints);
-    setAnalysisResult(result);
-    setIsAnalyzing(false);
+  const openEngineeringModal = async () => {
+    setShowEngineeringModal(true);
+    // Ejecutamos análisis automáticamente al abrir si no hay uno previo
+    if (!analysisResult) {
+      setIsAnalyzing(true);
+      // Adaptador para que los datos coincidan con lo que espera el servicio
+      // El servicio espera array de logs, lista de operarios y puntos totales
+      const totalPts = filteredLogs.reduce((sum, l) => sum + l.totalPoints, 0);
+      const result = await analyzeProductionData(filteredLogs, operatorList, totalPts);
+      setAnalysisResult(result);
+      setIsAnalyzing(false);
+    }
   };
 
-  const executeExportPDF = () => {
+  const handleFullReportPDF = () => {
+    // Genera un PDF Especial con el texto de la IA + Datos
     const doc = new jsPDF();
-    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
+    const title = `Reporte de Ingeniería TopSafe`;
     
     doc.setFontSize(18);
-    doc.text("Reporte Gerencial - TopSafe", 14, 20);
-    doc.setFontSize(12);
-    doc.text(title, 14, 28);
-    
-    const totalPts = filteredLogs.reduce((acc, curr) => acc + curr.totalPoints, 0);
-    const totalQty = filteredLogs.reduce((acc, curr) => acc + curr.quantity, 0);
-    
-    doc.text(`Total Puntos: ${totalPts.toFixed(2)} | Unidades: ${totalQty}`, 14, 36);
+    doc.text(title, 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Generado por: Ingeniería | Fecha: ${new Date().toLocaleDateString()}`, 14, 26);
+    doc.text(`Filtro: ${selectedOperator} | ${startDate} al ${endDate}`, 14, 32);
 
-    let startY = 45;
-    
-    // Si hay análisis de IA visible, lo agregamos
+    let startY = 40;
+
+    // Agregar texto de IA
     if (analysisResult) {
-      doc.setFontSize(14);
-      doc.setTextColor(234, 88, 12);
-      doc.text("Análisis Inteligente", 14, startY);
+      doc.setFontSize(12);
+      doc.setTextColor(234, 88, 12); // Naranja
+      doc.text("Análisis Inteligente (Gemini AI)", 14, startY);
+      
       doc.setFontSize(10);
       doc.setTextColor(0);
-      const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '');
+      // Limpiamos markdown básico
+      const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/>/g, '');
       const splitText = doc.splitTextToSize(cleanText, 180);
       doc.text(splitText, 14, startY + 8);
       startY += 10 + (splitText.length * 5);
     }
 
+    // Agregar Tabla Resumida
     autoTable(doc, {
       startY: startY,
-      head: [['Fecha', 'Operario', 'Sector', 'Modelo', 'Operación', 'Cant', 'Pts']],
+      head: [['Fecha', 'Operario', 'Sector', 'Modelo', 'Op', 'Pts']],
       body: filteredLogs.map(l => [
         new Date(l.timestamp).toLocaleDateString(),
         l.operatorName,
         l.sector,
         l.model,
         l.operation,
-        l.quantity,
-        l.totalPoints.toFixed(2)
+        l.totalPoints.toFixed(1)
       ]),
       theme: 'grid'
     });
-    doc.save(`Reporte_TopSafe.pdf`);
+
+    doc.save('Reporte_Ingenieria_Full.pdf');
   };
 
-  // --- PREPARACIÓN GRÁFICOS ---
+  // --- PREPARACIÓN GRÁFICOS (Tu código original) ---
   const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
-    if (!acc[log.operatorName]) acc[log.operatorName] = { name: log.operatorName, points: 0 };
+    if (!acc[log.operatorName]) {
+      acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
+    }
     acc[log.operatorName].points += log.totalPoints;
+    acc[log.operatorName].quantity += log.quantity;
     return acc;
-  }, {} as Record<string, { name: string; points: number }>)).sort((a, b) => b.points - a.points);
+  }, {} as Record<string, { name: string; points: number; quantity: number }>))
+  .map(stat => ({ ...stat, percentage: (stat.points / dailyTarget) * 100 }))
+  .sort((a, b) => b.points - a.points);
 
   const countBySector = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.sector]) acc[log.sector] = { name: log.sector, value: 0 };
@@ -192,129 +215,236 @@ export const ManagerDashboard: React.FC = () => {
     return acc;
   }, {} as Record<string, { name: string; value: number }>));
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+  const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
+    const date = log.timestamp.split('T')[0]; 
+    const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
+    if (!acc[date]) acc[date] = { fullDate: date, name: shortDate, points: 0, quantity: 0 };
+    acc[date].points += log.totalPoints;
+    acc[date].quantity += log.quantity;
+    return acc;
+  }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
+  .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
+
+  const modelStats = Object.values(filteredLogs.reduce((acc, log) => {
+    if (!acc[log.model]) acc[log.model] = { name: log.model, value: 0 };
+    acc[log.model].value += log.quantity;
+    return acc;
+  }, {} as Record<string, { name: string; value: number }>))
+  .sort((a, b) => b.value - a.value).slice(0, 5);
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
 
   if (loading && allLogs.length === 0) return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>;
 
   return (
     <div className="space-y-8 p-4 md:p-8">
-      {/* Header */}
+      {/* --- HEADER NORMAL (GERENCIA) --- */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
-           <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-             Dashboard Gerencial
-             {isAuthorized && <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full border border-green-200 flex items-center gap-1"><ShieldCheck className="w-3 h-3"/> Ingeniería</span>}
-           </h2>
+           <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
            <p className="text-slate-500 text-sm">Resumen de producción y métricas</p>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-center">
-           {/* Filtros */}
-           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
-              <Users className="w-4 h-4 text-slate-500" />
-              <select value={selectedOperator} onChange={(e) => setSelectedOperator(e.target.value)} className="bg-transparent text-sm outline-none">
-                 <option value="all">Todos</option>
-                 {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
-              </select>
-           </div>
-           
-           {/* Botones Protegidos */}
-           <button onClick={() => requestAccess('ai')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${isAuthorized ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-500'}`}>
-             {isAuthorized ? <BrainCircuit className="w-4 h-4" /> : <Lock className="w-4 h-4"/>} IA
-           </button>
-           <button onClick={() => requestAccess('pdf')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${isAuthorized ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-slate-200 text-slate-500'}`}>
-             {isAuthorized ? <FileText className="w-4 h-4" /> : <Lock className="w-4 h-4"/>} PDF
-           </button>
+        <div className="flex flex-col md:flex-row gap-3 items-center w-full xl:w-auto flex-wrap">
+          {/* Selector Operario */}
+          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+             <Users className="w-4 h-4 text-slate-500" />
+             <select value={selectedOperator} onChange={(e) => setSelectedOperator(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700 font-medium">
+                <option value="all">Vista Global (Todos)</option>
+                <option disabled>──────────</option>
+                {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
+             </select>
+          </div>
 
-           <button onClick={refreshData} className="p-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"><RefreshCw className="w-5 h-5 text-slate-600" /></button>
-        </div>
-      </div>
+          {/* Selector Fecha */}
+          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+             <Calendar className="w-4 h-4 text-slate-500" />
+             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
+             <span className="text-slate-400">-</span>
+             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
+          </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-600">
-          <p className="text-sm text-slate-500 font-bold uppercase">Puntos Totales</p>
-          <p className="text-3xl font-bold text-slate-800 mt-2">{filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0).toFixed(1)}</p>
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-emerald-600">
-          <p className="text-sm text-slate-500 font-bold uppercase">Unidades</p>
-          <p className="text-3xl font-bold text-slate-800 mt-2">{filteredLogs.reduce((sum, log) => sum + log.quantity, 0).toLocaleString()}</p>
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-amber-500">
-          <p className="text-sm text-slate-500 font-bold uppercase">Meta Diaria</p>
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-3xl font-bold text-slate-800">{dailyTarget.toLocaleString()}</p>
-            {!isEditingTarget ? <button onClick={() => setIsEditingTarget(true)}><Pencil className="w-4 h-4 text-slate-400"/></button> : 
-             <div className="flex gap-1"><input type="number" value={tempTarget} onChange={e=>setTempTarget(e.target.value)} className="w-20 border rounded p-1"/><button onClick={handleSaveTarget}><Save className="w-4 h-4 text-emerald-600"/></button></div>}
+          <div className="flex gap-2 w-full md:w-auto">
+             {/* Botones Estándar */}
+             <button onClick={handleDownloadExcel} className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200" title="Excel"><FileDown className="w-5 h-5" /></button>
+             <button onClick={handleDownloadStandardPDF} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="PDF Básico"><FileText className="w-5 h-5" /></button>
+             <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"><RefreshCw className="w-5 h-5" /></button>
+             
+             {/* BOTÓN INGENIERÍA (Con Candado) */}
+             <div className="h-8 w-px bg-slate-300 mx-1"></div>
+             <button 
+               onClick={handleEngineeringAccess} 
+               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAuthorized ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+             >
+               {isAuthorized ? <BrainCircuit className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+               {isAuthorized ? 'Ingeniería' : 'Acceso Ing.'}
+             </button>
           </div>
         </div>
       </div>
 
-      {/* Gráficos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm h-80">
-          <h3 className="text-md font-bold text-slate-700 mb-4">Producción por Sector</h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={countBySector} cx="50%" cy="50%" innerRadius={60} outerRadius={80} fill="#8884d8" paddingAngle={5} dataKey="value">
-                {countBySector.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+      {/* --- KPI CARDS (Tu diseño original) --- */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
+          <div className="flex justify-between items-start mb-2">
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Target className="w-4 h-4 text-amber-500" /> Meta Diaria</p>
+            {!isEditingTarget ? <button onClick={() => setIsEditingTarget(true)}><Pencil className="w-4 h-4 text-slate-400 hover:text-white" /></button> : <button onClick={handleSaveTarget}><Save className="w-4 h-4 text-emerald-400" /></button>}
+          </div>
+          {isEditingTarget ? <input type="number" value={tempTarget} onChange={(e) => setTempTarget(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xl font-bold w-full text-white" autoFocus /> : <p className="text-3xl font-black mt-1 tracking-tight">{dailyTarget.toLocaleString()} <span className="text-sm font-normal text-slate-400">pts</span></p>}
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm h-80">
-          <h3 className="text-md font-bold text-slate-700 mb-4">Ranking Operarios (Puntos)</h3>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Producción (u)</p><p className="text-3xl font-bold text-slate-800 mt-2">{filteredLogs.reduce((sum, log) => sum + log.quantity, 0).toLocaleString()}</p></div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Puntos Totales</p><p className="text-3xl font-bold text-blue-600 mt-2">{filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0).toFixed(1)}</p></div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Registros</p><p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p></div>
+      </div>
+
+      {/* --- GRÁFICOS (Tu diseño original) --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {selectedOperator === 'all' && (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
+            <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
+            <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+               {operatorStats.map((stat) => (
+                 <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                   <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.percentage.toFixed(0)}%</span></div>
+                   <div className="w-full bg-slate-200 rounded-full h-2"><div className={`h-full ${stat.percentage >= 100 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+                 </div>
+               ))}
+            </div>
+          </div>
+        )}
+
+        <div className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 ${selectedOperator === 'all' ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
+          <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={operatorStats.slice(0, 10)}>
+            <LineChart data={dailyTrend}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" fontSize={10} interval={0} />
+              <XAxis dataKey="name" tick={{fontSize: 12}} />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="points" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-            </BarChart>
+              <Legend />
+              <Line type="monotone" dataKey="points" name="Puntos" stroke="#2563eb" strokeWidth={3} dot={{r: 4}} />
+              <Line type="monotone" dataKey="quantity" name="Unidades" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" />
+            </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* MODAL PASSWORD */}
+      {/* --- HISTORIAL (Tabla original) --- */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
+         <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
+         <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-sm text-left text-slate-600">
+               <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                  <tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Sector</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Cant</th><th className="px-6 py-3 text-right">Pts</th></tr>
+               </thead>
+               <tbody>
+                  {filteredLogs.slice(0, 100).map(log => (
+                     <tr key={log.id} className="border-b hover:bg-slate-50">
+                        <td className="px-6 py-4">{new Date(log.timestamp).toLocaleDateString()}</td>
+                        <td className="px-6 py-4 font-bold">{log.operatorName}</td>
+                        <td className="px-6 py-4"><span className="bg-slate-100 px-2 py-1 rounded text-xs">{log.sector}</span></td>
+                        <td className="px-6 py-4">{log.model} - {log.operation}</td>
+                        <td className="px-6 py-4 text-right">{log.quantity}</td>
+                        <td className="px-6 py-4 text-right font-bold text-blue-600">{log.totalPoints.toFixed(1)}</td>
+                     </tr>
+                  ))}
+               </tbody>
+            </table>
+         </div>
+      </div>
+
+      {/* --- MODAL 1: CONTRASEÑA --- */}
       {showAuthModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div className="bg-slate-900 p-6 text-white text-center">
               <Lock className="w-10 h-10 mx-auto mb-2 text-orange-500" />
               <h3 className="text-lg font-bold">Acceso Ingeniería</h3>
             </div>
             <form onSubmit={verifyPassword} className="p-6">
-              <input type="password" autoFocus className="w-full border rounded-lg p-3 outline-none mb-4 text-center tracking-widest" placeholder="Contraseña" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} />
+              <input type="password" autoFocus className="w-full border rounded-lg p-3 outline-none mb-4 text-center tracking-widest font-mono text-xl" placeholder="••••••" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} />
               <div className="flex gap-2">
                 <button type="button" onClick={() => setShowAuthModal(false)} className="flex-1 bg-slate-100 py-3 rounded-lg font-bold">Cancelar</button>
-                <button type="submit" className="flex-1 bg-orange-600 text-white py-3 rounded-lg font-bold">Entrar</button>
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700">Entrar</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL AI ANALYSIS */}
-      {showAnalysisModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in">
-            <div className="bg-indigo-600 p-6 flex justify-between items-center text-white">
-              <h3 className="text-xl font-bold flex items-center gap-2"><BrainCircuit className="w-6 h-6"/> Análisis IA</h3>
-              {!isAnalyzing && <button onClick={() => setShowAnalysisModal(false)}><X className="w-6 h-6"/></button>}
+      {/* --- MODAL 2: INGENIERÍA / IA (Se abre al poner la clave) --- */}
+      {showEngineeringModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in zoom-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
+            
+            {/* Header del Modal */}
+            <div className="bg-gradient-to-r from-indigo-900 to-slate-900 p-6 flex justify-between items-center text-white shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="bg-indigo-500/20 p-2 rounded-lg"><BrainCircuit className="w-8 h-8 text-indigo-400"/></div>
+                <div>
+                  <h3 className="text-2xl font-bold">Modo Ingeniería</h3>
+                  <p className="text-slate-400 text-sm flex items-center gap-2"><ShieldCheck className="w-3 h-3"/> Sesión Segura Activa</p>
+                </div>
+              </div>
+              <button onClick={() => setShowEngineeringModal(false)} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><X className="w-6 h-6"/></button>
             </div>
-            <div className="p-8 max-h-[60vh] overflow-y-auto">
-              {isAnalyzing ? (
-                <div className="flex flex-col items-center py-10"><Loader2 className="w-12 h-12 animate-spin text-indigo-600"/><p>Analizando...</p></div>
-              ) : (
-                <div className="prose prose-sm max-w-none"><ReactMarkdown>{analysisResult}</ReactMarkdown></div>
-              )}
+
+            {/* Cuerpo del Modal */}
+            <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
+                
+                {/* Columna Izquierda: Reporte IA */}
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
+                    <h4 className="text-lg font-bold text-indigo-900 mb-4 border-b pb-2">Análisis de Inteligencia Artificial</h4>
+                    {isAnalyzing ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                        <Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" />
+                        <p className="animate-pulse">Gemini está analizando {filteredLogs.length} registros...</p>
+                      </div>
+                    ) : (
+                      <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">
+                        {analysisResult || "No hay datos suficientes para generar un análisis."}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Columna Derecha: Acciones */}
+                <div className="space-y-6">
+                  <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h4 className="font-bold text-slate-800 mb-4">Exportación Avanzada</h4>
+                    <p className="text-sm text-slate-500 mb-6">Genera un documento oficial incluyendo el análisis de IA, gráficos estadísticos y tablas de datos completos.</p>
+                    <button 
+                      onClick={handleFullReportPDF} 
+                      className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-[1.02]"
+                    >
+                      <FileText className="w-5 h-5" /> DESCARGAR REPORTE COMPLETO
+                    </button>
+                  </div>
+                  
+                  <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
+                    <h4 className="font-bold text-indigo-900 mb-2">Estado del Sistema</h4>
+                    <ul className="text-sm space-y-2 text-indigo-800">
+                      <li>• Conexión Gemini: <span className="font-bold text-green-600">Activa</span></li>
+                      <li>• Registros Analizados: <span className="font-bold">{filteredLogs.length}</span></li>
+                      <li>• Filtro Actual: <span className="font-bold">{selectedOperator === 'all' ? 'Global' : selectedOperator}</span></li>
+                    </ul>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Footer Modal */}
+            <div className="bg-white border-t p-4 flex justify-end shrink-0">
+               <button onClick={() => setShowEngineeringModal(false)} className="text-slate-500 hover:text-slate-800 font-medium px-6">Volver al Dashboard</button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };
