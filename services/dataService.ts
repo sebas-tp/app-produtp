@@ -1,34 +1,46 @@
-// services/dataService.ts
-
-// 1. IMPORTAMOS LA BASE DE DATOS DESDE TU ARCHIVO DE CONFIGURACIÓN
-import { db } from '../firebaseConfig'; 
-
+import { initializeApp } from "firebase/app";
 import { 
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
+  getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
   query, orderBy, setDoc, where, writeBatch 
 } from 'firebase/firestore';
-
-// 2. IMPORTAMOS LOS TIPOS (incluyendo NewsItem) DESDE TYPES.TS
-// (Ya no definimos nada aquí para evitar conflictos)
 import { ProductionLog, Sector, PointRule, NewsItem } from '../types';
-
-// Re-exportamos para facilitar el uso en componentes
-export type { NewsItem };
-
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- COLECCIONES ---
+// Re-exportamos NewsItem para evitar errores de importación en componentes
+export type { NewsItem };
+
+// =========================================================
+// 1. CONFIGURACIÓN DE FIREBASE (INTEGRADA)
+// =========================================================
+
+const firebaseConfig = {
+  // Usamos tu clave real o la variable de entorno si existe
+  apiKey: process.env.FIREBASE_API_KEY || "AIzaSyDYAX9gis2MKtEabUzZDPFUlhmeX38U_Bs",
+  authDomain: "produccion-topsafe.firebaseapp.com",
+  projectId: "produccion-topsafe",
+  storageBucket: "produccion-topsafe.firebasestorage.app",
+  messagingSenderId: "798185919710",
+  appId: "1:798185919710:web:bf420d718d7bc2b3e9de4f"
+};
+
+// Inicializamos la app aquí mismo
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app);
+
+// =========================================================
+// 2. CONSTANTES
+// =========================================================
+
 const LOGS_COL = 'production_logs';
 const CONFIG_COL = 'app_config';
 const NEWS_COL = 'news';
 const MATRIX_COL = 'points_matrix';
-
 const DEFAULT_TARGET = 24960;
 
-// ==========================================
-// 1. GESTIÓN DE LOGS (PRODUCCIÓN)
-// ==========================================
+// =========================================================
+// 3. GESTIÓN DE LOGS (PRODUCCIÓN)
+// =========================================================
 
 export const getLogs = async (): Promise<ProductionLog[]> => {
   try {
@@ -38,7 +50,7 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
       const data = doc.data();
       return {
         id: doc.id,
-        // Normalización de datos para evitar errores
+        // Normalización para compatibilidad
         timestamp: data.timestamp || new Date().toISOString(),
         createdAt: data.timestamp || new Date().toISOString(),
         date: data.date || '',
@@ -56,7 +68,7 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
         
         startTime: data.startTime || '',
         endTime: data.endTime || '',
-        orderNumber: data.orderNumber || '' // Nuevo campo N° Orden
+        orderNumber: data.orderNumber || '' // <--- CAMPO NUEVO (N° ORDEN)
       } as ProductionLog;
     });
   } catch (error) {
@@ -70,7 +82,7 @@ export const getProductionLogs = getLogs;
 
 export const saveLog = async (log: any) => {
   const { id, ...logData } = log;
-  // Guardamos campos duplicados para asegurar compatibilidad futura
+  // Guardamos con redundancia para asegurar compatibilidad
   const dataToSave = {
     ...logData,
     operator: logData.operatorName,
@@ -84,7 +96,8 @@ export const saveProductionLog = saveLog;
 export const updateProductionLog = async (log: Partial<ProductionLog> & { id: string }) => {
   const { id, ...data } = log;
   const docRef = doc(db, LOGS_COL, id);
-  // Actualizamos ambos campos si es necesario
+  
+  // Actualizamos campos redundantes si es necesario
   const updateData: any = { ...data };
   if (data.operatorName) updateData.operator = data.operatorName;
   if (data.totalPoints) updateData.points = data.totalPoints;
@@ -92,7 +105,6 @@ export const updateProductionLog = async (log: Partial<ProductionLog> & { id: st
   await updateDoc(docRef, updateData);
 };
 
-// --- FUNCIÓN DE BORRADO ---
 export const deleteProductionLog = async (id: string) => {
   await deleteDoc(doc(db, LOGS_COL, id));
 };
@@ -107,14 +119,14 @@ export const clearLogs = async (): Promise<void> => {
   await batch.commit();
 };
 
-// ==========================================
-// 2. CONFIGURACIÓN (LISTAS Y METAS)
-// ==========================================
+// =========================================================
+// 4. CONFIGURACIÓN (LISTAS Y METAS)
+// =========================================================
 
 const fetchList = async (docId: string): Promise<string[]> => {
   try {
     const d = await getDocs(collection(db, CONFIG_COL));
-    // Estrategia doble: Busca documento 'lists' o documento individual
+    // Soporte para estructura de documento único 'lists' o múltiples documentos
     if (d.docs.find(d => d.id === 'lists')) {
        const listDoc = d.docs.find(d => d.id === 'lists');
        return listDoc?.data()?.[docId] || []; 
@@ -148,9 +160,9 @@ export const saveProductivityTarget = async (value: number) => {
   await setDoc(doc(db, CONFIG_COL, 'targets'), { dailyTarget: value }, { merge: true });
 };
 
-// ==========================================
-// 3. MATRIZ DE PUNTOS
-// ==========================================
+// =========================================================
+// 5. MATRIZ DE PUNTOS
+// =========================================================
 
 export const getPointsMatrix = async (): Promise<PointRule[]> => {
   try {
@@ -174,7 +186,6 @@ export const deletePointRule = async (id: string) => {
   await deleteDoc(doc(db, MATRIX_COL, id));
 };
 
-// Helpers Síncronos
 export const getPointRuleSync = (matrix: PointRule[], sector: Sector | string, model: string, operation: string) => {
   return matrix.find(r => r.sector === sector && r.model === model && r.operation === operation);
 };
@@ -184,9 +195,9 @@ export const calculatePointsSync = (matrix: PointRule[], sector: Sector, model: 
   return rule ? rule.pointsPerUnit * quantity : 0;
 };
 
-// ==========================================
-// 4. NOTICIAS Y COMUNICADOS
-// ==========================================
+// =========================================================
+// 6. NOTICIAS Y COMUNICADOS
+// =========================================================
 
 export const getActiveNews = async (): Promise<NewsItem[]> => {
   try {
@@ -206,9 +217,9 @@ export const deleteNews = async (id: string) => {
   await deleteDoc(doc(db, NEWS_COL, id));
 };
 
-// ==========================================
-// 5. EXPORTACIONES (CSV / PDF)
-// ==========================================
+// =========================================================
+// 7. EXPORTACIONES (CSV / PDF)
+// =========================================================
 
 export const downloadCSV = (logs: ProductionLog[], filename: string) => {
   if (logs.length === 0) { alert("No hay datos."); return; }
@@ -253,6 +264,7 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
   doc.setFontSize(10);
   doc.text(`Total Unidades: ${totalQty} | Total Puntos: ${totalPts.toFixed(1)}`, 14, 28);
 
+  // Tabla con N° Orden incluida
   const tableColumn = ["Fecha", "Orden", "Operario", "Modelo", "Operación", "Cant.", "Pts"];
   const tableRows = logs.map(log => [
     new Date(log.timestamp).toLocaleDateString(),
