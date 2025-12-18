@@ -45,7 +45,7 @@ export const ManagerDashboard: React.FC = () => {
   const [analysisResult, setAnalysisResult] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const MASTER_PASSWORD = "Ing.2026"; // <--- CAMBIAR CONTRASEÑA AQUI
+  const MASTER_PASSWORD = "admin"; // <--- CAMBIAR CONTRASEÑA AQUI
 
   // --- CARGA INICIAL ---
   useEffect(() => {
