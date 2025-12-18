@@ -8,8 +8,8 @@ export enum Sector {
 }
 
 export interface PointRule {
-  id?: string; // Added for UI management
-  sector: Sector;
+  id?: string;
+  sector: Sector | string;
   model: string;
   operation: string;
   pointsPerUnit: number;
@@ -17,15 +17,27 @@ export interface PointRule {
 
 export interface ProductionLog {
   id: string;
-  timestamp: string; // ISO String
+  timestamp: string; // ISO String (Fecha y Hora)
   startTime: string;
   endTime: string;
+  
+  // Datos del Operario
   operatorName: string;
-  sector: Sector;
+  
+  // Datos de Producción
+  sector: Sector | string;
   model: string;
   operation: string;
   quantity: number;
   totalPoints: number;
+  
+  // --- NUEVO CAMPO AGREGADO ---
+  orderNumber?: string; 
+  
+  // Campos de compatibilidad (opcionales para evitar errores si usas componentes viejos)
+  date?: string; 
+  operator?: string;
+  points?: number;
 }
 
 export interface DashboardStats {
@@ -40,4 +52,14 @@ export type UserRole = 'admin' | 'operator';
 export interface User {
   name: string;
   role: UserRole;
+}
+
+// --- INTERFAZ PARA LAS NOTICIAS ---
+export interface NewsItem {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  expiresAt: string;
+  priority: 'normal' | 'high';
 }
