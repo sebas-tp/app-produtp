@@ -1,19 +1,29 @@
-import { db } from '../firebaseConfig'; // Asegúrate de que la ruta sea correcta
+// services/dataService.ts
+
+// 1. IMPORTAMOS LA BASE DE DATOS DESDE TU ARCHIVO DE CONFIGURACIÓN
+import { db } from '../firebaseConfig'; 
+
 import { 
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
   query, orderBy, setDoc, where, writeBatch 
 } from 'firebase/firestore';
+
+// 2. IMPORTAMOS LOS TIPOS (incluyendo NewsItem) DESDE TYPES.TS
+// (Ya no definimos nada aquí para evitar conflictos)
 import { ProductionLog, Sector, PointRule, NewsItem } from '../types';
+
+// Re-exportamos para facilitar el uso en componentes
+export type { NewsItem };
+
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Constantes de Colecciones
+// --- COLECCIONES ---
 const LOGS_COL = 'production_logs';
 const CONFIG_COL = 'app_config';
 const NEWS_COL = 'news';
 const MATRIX_COL = 'points_matrix';
 
-// Valores por defecto (Fallback si falla la BD)
 const DEFAULT_TARGET = 24960;
 
 // ==========================================
@@ -28,7 +38,7 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
       const data = doc.data();
       return {
         id: doc.id,
-        // Normalización de datos (para compatibilidad vieja/nueva)
+        // Normalización de datos para evitar errores
         timestamp: data.timestamp || new Date().toISOString(),
         createdAt: data.timestamp || new Date().toISOString(),
         date: data.date || '',
@@ -46,39 +56,43 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
         
         startTime: data.startTime || '',
         endTime: data.endTime || '',
-        orderNumber: data.orderNumber || '' // <--- NUEVO CAMPO
+        orderNumber: data.orderNumber || '' // Nuevo campo N° Orden
       } as ProductionLog;
     });
   } catch (error) {
-    console.error("Error getting logs:", error);
+    console.error("Error fetching logs:", error);
     return [];
   }
 };
 
-// Alias para compatibilidad
+// Alias de compatibilidad
 export const getProductionLogs = getLogs;
 
 export const saveLog = async (log: any) => {
   const { id, ...logData } = log;
-  // Guardamos con campos dobles para asegurar compatibilidad futura
+  // Guardamos campos duplicados para asegurar compatibilidad futura
   const dataToSave = {
     ...logData,
-    operator: logData.operatorName, // Guardamos como operator y operatorName
-    points: logData.totalPoints     // Guardamos como points y totalPoints
+    operator: logData.operatorName,
+    points: logData.totalPoints
   };
   await addDoc(collection(db, LOGS_COL), dataToSave);
 };
 
-// Alias para compatibilidad
 export const saveProductionLog = saveLog;
 
 export const updateProductionLog = async (log: Partial<ProductionLog> & { id: string }) => {
   const { id, ...data } = log;
   const docRef = doc(db, LOGS_COL, id);
-  await updateDoc(docRef, data);
+  // Actualizamos ambos campos si es necesario
+  const updateData: any = { ...data };
+  if (data.operatorName) updateData.operator = data.operatorName;
+  if (data.totalPoints) updateData.points = data.totalPoints;
+
+  await updateDoc(docRef, updateData);
 };
 
-// --- NUEVA FUNCIÓN DE BORRADO ---
+// --- FUNCIÓN DE BORRADO ---
 export const deleteProductionLog = async (id: string) => {
   await deleteDoc(doc(db, LOGS_COL, id));
 };
@@ -97,32 +111,28 @@ export const clearLogs = async (): Promise<void> => {
 // 2. CONFIGURACIÓN (LISTAS Y METAS)
 // ==========================================
 
-// Helper genérico para listas
 const fetchList = async (docId: string): Promise<string[]> => {
   try {
     const d = await getDocs(collection(db, CONFIG_COL));
-    const docData = d.docs.find(d => d.id === docId); // Busca 'lists' o el ID especifico
-    // Si usas un documento 'lists' con campos dentro:
+    // Estrategia doble: Busca documento 'lists' o documento individual
     if (d.docs.find(d => d.id === 'lists')) {
        const listDoc = d.docs.find(d => d.id === 'lists');
        return listDoc?.data()?.[docId] || []; 
     }
-    // Si usas documentos separados por ID (operators, models, etc)
+    const docData = d.docs.find(d => d.id === docId);
     if (docData && docData.exists()) return docData.data().list || [];
-    
     return [];
-  } catch (e) { console.error(e); return []; }
+  } catch (e) { return []; }
 };
 
 export const getOperators = async () => fetchList('operators');
 export const getModels = async () => fetchList('models');
 export const getOperations = async () => fetchList('operations');
 
-export const saveOperators = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'operators'), { list }); }; // O 'lists' { operators: list } segun tu esquema
+export const saveOperators = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'operators'), { list }); };
 export const saveModels = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'models'), { list }); };
 export const saveOperations = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'operations'), { list }); };
 
-// Metas
 export const getProductivityTarget = async (): Promise<number> => {
   try {
     const d = await getDocs(collection(db, CONFIG_COL));
@@ -164,7 +174,7 @@ export const deletePointRule = async (id: string) => {
   await deleteDoc(doc(db, MATRIX_COL, id));
 };
 
-// Helpers síncronos
+// Helpers Síncronos
 export const getPointRuleSync = (matrix: PointRule[], sector: Sector | string, model: string, operation: string) => {
   return matrix.find(r => r.sector === sector && r.model === model && r.operation === operation);
 };
@@ -204,19 +214,18 @@ export const downloadCSV = (logs: ProductionLog[], filename: string) => {
   if (logs.length === 0) { alert("No hay datos."); return; }
   
   const delimiter = ";"; 
-  // AGREGAMOS 'ORDEN' A LOS ENCABEZADOS
   const headers = ["ID", "Fecha", "Orden", "Operario", "Sector", "Modelo", "Operacion", "Cantidad", "Total Puntos"];
   
   const rows = logs.map(log => [
     log.id,
     new Date(log.timestamp).toLocaleDateString(),
-    log.orderNumber || '-', // <--- DATO NUEVO
+    log.orderNumber || '-',
     `"${log.operatorName}"`, 
     log.sector,
     log.model,
     log.operation,
     log.quantity,
-    log.totalPoints.toFixed(2).replace('.', ',') // Tu formato original para Excel
+    log.totalPoints.toFixed(2).replace('.', ',')
   ]);
 
   const csvContent = "\uFEFF" + [headers.join(delimiter), ...rows.map(r => r.join(delimiter))].join("\n");
@@ -244,7 +253,6 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
   doc.setFontSize(10);
   doc.text(`Total Unidades: ${totalQty} | Total Puntos: ${totalPts.toFixed(1)}`, 14, 28);
 
-  // AGREGAMOS COLUMNA 'ORDEN'
   const tableColumn = ["Fecha", "Orden", "Operario", "Modelo", "Operación", "Cant.", "Pts"];
   const tableRows = logs.map(log => [
     new Date(log.timestamp).toLocaleDateString(),
