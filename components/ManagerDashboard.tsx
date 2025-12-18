@@ -164,6 +164,35 @@ export const ManagerDashboard: React.FC = () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
     const title = `Reporte de Ingeniería TopSafe`;
+
+// --- DENTRO DE ManagerDashboard.tsx ---
+
+  const runAnalysis = async () => {
+    setIsAnalyzing(true);
+    try {
+      // AQUÍ ESTÁ EL CAMBIO CLAVE:
+      // Pasamos 'filteredLogs' (lo que se ve), 'allLogs' (el contexto global), 
+      // la lista de nombres y quién está seleccionado.
+      const result = await analyzeProductionData(
+        filteredLogs, 
+        allLogs, 
+        operatorList, 
+        selectedOperator
+      );
+      
+      setAnalysisResult(result);
+    } catch (e) {
+      setAnalysisResult("Error al generar análisis.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+
+
+
+
+
     
     // Encabezado
     doc.setFontSize(18);
