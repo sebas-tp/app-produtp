@@ -1,13 +1,13 @@
 import { ProductionLog } from '../types';
 
 export const analyzeProductionData = async (
-  currentData: ProductionLog[],      // Datos filtrados (lo que se ve en tabla)
-  allData: ProductionLog[],          // Datos globales (para comparar/contexto)
-  operatorList: string[],            // Lista de nombres
-  selectedOperator: string           // Nombre del filtro ('all' o un nombre)
+  currentData: ProductionLog[],      
+  allData: ProductionLog[],          
+  operatorList: string[],            
+  selectedOperator: string           
 ): Promise<string> => {
   
-  // Simulamos "pensando..."
+  // Simulamos tiempo de análisis
   await new Promise(resolve => setTimeout(resolve, 1500));
 
   return generateSmartReport(currentData, allData, selectedOperator);
@@ -20,7 +20,9 @@ function generateSmartReport(currentData: ProductionLog[], allData: ProductionLo
   // Agrupamos puntos por operario (Global)
   const globalOpStats: Record<string, number> = {};
   allData.forEach(d => {
+    // @ts-ignore
     const name = d.operator || d.operatorName || 'N/A';
+    // @ts-ignore
     const pts = Number(d.points || d.totalPoints || 0);
     globalOpStats[name] = (globalOpStats[name] || 0) + pts;
   });
@@ -47,11 +49,10 @@ function generateSmartReport(currentData: ProductionLog[], allData: ProductionLo
     // Comparación con promedio
     const diffPercent = plantAverage > 0 ? ((opPoints - plantAverage) / plantAverage) * 100 : 0;
     const statusIcon = diffPercent >= 0 ? "🟢" : (diffPercent > -15 ? "🟡" : "🔴");
-    const statusText = diffPercent >= 0 ? "Supera el promedio" : "Debajo del promedio";
-
+    
     report += `### 👤 Análisis de Desempeño: ${selectedOp}\n\n`;
     
-    report += `**METRICAS CLAVE:**\n`;
+    report += `**MÉTRICAS CLAVE:**\n`;
     report += `* **Puntos Totales:** ${opPoints.toLocaleString()} pts\n`;
     report += `* **Ranking en Planta:** Puesto #${opRank} de ${activeOpsCount} operarios.\n`;
     report += `* **Comparativa:** ${statusIcon} **${Math.abs(diffPercent).toFixed(1)}%** ${diffPercent >= 0 ? 'arriba' : 'abajo'} del promedio de planta (${plantAverage.toFixed(0)} pts).\n\n`;
@@ -66,13 +67,15 @@ function generateSmartReport(currentData: ProductionLog[], allData: ProductionLo
       report += `El desempeño es **estable y consistente** con el resto del equipo. Cumple con el estándar operativo normal.\n`;
     }
 
-    report += `\n> *Referencia: El líder actual es ${topPerformer?.name} con ${topPerformer?.points.toFixed(0)} pts.*`;
+    if (topPerformer) {
+        report += `\n> *Referencia: El líder actual es ${topPerformer.name} con ${topPerformer.points.toFixed(0)} pts.*`;
+    }
   
   } 
   
   // --- CASO B: REPORTE GLOBAL (Gerencial) ---
   else {
-    const efficiency = (globalPoints / (activeOpsCount * 800)) * 100; // Meta base 800 como ejemplo
+    const efficiency = activeOpsCount > 0 ? (globalPoints / (activeOpsCount * 800)) * 100 : 0; // Meta base 800
     
     report += `### 🏭 Reporte Global de Planta\n\n`;
     
@@ -87,11 +90,17 @@ function generateSmartReport(currentData: ProductionLog[], allData: ProductionLo
     });
 
     report += `\n**📉 OPORTUNIDADES DE MEJORA:**\n`;
-    // Buscamos los 3 últimos (que tengan puntos > 0 para no contar ausentes)
-    const bottom performers = ranking.filter(r => r.points > 0).slice(-3).reverse();
-    if (bottom performers.length > 0) {
-      report += `Se detecta rendimiento bajo en: **${bottom performers.map(r => r.name).join(", ")}**. `;
-      report += `Estos operarios están alejados del líder por más de un ${(topPerformer ? ((topPerformer.points - bottom performers[0].points)/topPerformer.points * 100).toFixed(0) : 0)}%.\n`;
+    
+    // CORRECCIÓN: Aquí estaba el error del espacio en la variable
+    const bottomPerformers = ranking.filter(r => r.points > 0).slice(-3).reverse();
+    
+    if (bottomPerformers.length > 0) {
+      report += `Se detecta rendimiento bajo en: **${bottomPerformers.map(r => r.name).join(", ")}**. `;
+      
+      if (topPerformer && topPerformer.points > 0) {
+          const gap = ((topPerformer.points - bottomPerformers[0].points) / topPerformer.points) * 100;
+          report += `Estos operarios están alejados del líder por más de un ${gap.toFixed(0)}%.\n`;
+      }
     } else {
       report += `La dispersión entre operarios es baja. ¡Excelente balanceo de línea!\n`;
     }
