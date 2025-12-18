@@ -4,13 +4,22 @@ import {
   getModels, saveModels, 
   getOperations, saveOperations, 
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
-  addNews, deleteNews, getActiveNews, NewsItem 
+  addNews, deleteNews, getActiveNews, NewsItem,
+  deleteOperatorWithData // <--- IMPORTANTE: La nueva función
 } from '../services/dataService';
 import { Sector, PointRule } from '../types';
 import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check } from 'lucide-react';
 
-// --- COMPONENTE GESTOR DE LISTAS (CON EDICIÓN) ---
-const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data: string[], onSave: (d: string[]) => void, icon: any }) => {
+// --- COMPONENTE GESTOR DE LISTAS (CON EDICIÓN Y BORRADO PERSONALIZADO) ---
+interface ListManagerProps {
+  title: string;
+  data: string[];
+  onSave: (d: string[]) => Promise<void>;
+  icon: any;
+  customDelete?: (item: string) => Promise<void>; // <--- Propiedad opcional para borrado especial
+}
+
+const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListManagerProps) => {
   const [newItem, setNewItem] = useState('');
   const [saving, setSaving] = useState(false);
   
@@ -28,8 +37,15 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
     }
   };
 
-  // Borrar
+  // Borrar (Lógica Dual)
   const handleDelete = async (item: string) => {
+    // Si hay un manejador personalizado (para Operarios), lo usamos
+    if (customDelete) {
+      await customDelete(item);
+      return;
+    }
+
+    // Si no, usamos el borrado estándar de lista
     if (window.confirm(`¿Está seguro de eliminar "${item}"?`)) {
       setSaving(true);
       const updatedList = data.filter(i => i !== item);
@@ -48,7 +64,7 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
   const saveEdit = async () => {
     if (!editValue.trim()) return;
     if (editValue === editingItem) {
-      setEditingItem(null); // No hubo cambios
+      setEditingItem(null); 
       return;
     }
     if (data.includes(editValue)) {
@@ -57,7 +73,6 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
     }
 
     setSaving(true);
-    // Reemplazamos el item viejo por el nuevo manteniendo el orden
     const updatedList = data.map(item => item === editingItem ? editValue : item);
     await onSave(updatedList);
     setEditingItem(null);
@@ -165,6 +180,30 @@ export const AdminPanel: React.FC = () => {
   const handleSaveOperators = async (newList: string[]) => { await saveOperators(newList); setOperators(newList); };
   const handleSaveModels = async (newList: string[]) => { await saveModels(newList); setModels(newList); };
   const handleSaveOperations = async (newList: string[]) => { await saveOperations(newList); setOperations(newList); };
+
+  // --- FUNCIÓN ESPECIAL PARA BORRAR OPERARIO Y DATOS ---
+  const handleSpecialDeleteOperator = async (name: string) => {
+    const confirmMessage = `⚠️ ALERTA DE SEGURIDAD ⚠️\n\n¿Estás seguro de eliminar a "${name}"?\n\nESTO ELIMINARÁ AL OPERARIO Y TODO SU HISTORIAL DE PRODUCCIÓN.\n\nEsta acción no se puede deshacer.`;
+    
+    if (window.confirm(confirmMessage)) {
+      setLoading(true);
+      try {
+        const success = await deleteOperatorWithData(name);
+        if (success) {
+          // Actualizamos la lista localmente
+          setOperators(prev => prev.filter(op => op !== name));
+          alert(`Operario ${name} y su historial han sido eliminados.`);
+        } else {
+          alert("Hubo un error al intentar eliminar.");
+        }
+      } catch (e) {
+        console.error(e);
+        alert("Error de conexión.");
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
 
   // ... Funciones de Matriz ...
   const handleEditClick = (rule: PointRule) => {
@@ -284,7 +323,17 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'lists' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <ListManager title="Operarios" data={operators} onSave={handleSaveOperators} icon={Users} />
+          
+          {/* GESTOR DE OPERARIOS (CON BORRADO ESPECIAL) */}
+          <ListManager 
+            title="Operarios" 
+            data={operators} 
+            onSave={handleSaveOperators} 
+            icon={Users} 
+            customDelete={handleSpecialDeleteOperator} // <--- AQUI CONECTAMOS LA FUNCION
+          />
+          
+          {/* GESTORES NORMALES */}
           <ListManager title="Modelos" data={models} onSave={handleSaveModels} icon={Box} />
           <ListManager title="Operaciones" data={operations} onSave={handleSaveOperations} icon={Layers} />
         </div>
