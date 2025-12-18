@@ -7,7 +7,7 @@ import { ProductionLog, Sector, PointRule, NewsItem } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Re-exportamos NewsItem para evitar errores de importación en componentes
+// Re-exportamos NewsItem
 export type { NewsItem };
 
 // =========================================================
@@ -15,7 +15,6 @@ export type { NewsItem };
 // =========================================================
 
 const firebaseConfig = {
-  // Usamos tu clave real o la variable de entorno si existe
   apiKey: process.env.FIREBASE_API_KEY || "AIzaSyDYAX9gis2MKtEabUzZDPFUlhmeX38U_Bs",
   authDomain: "produccion-topsafe.firebaseapp.com",
   projectId: "produccion-topsafe",
@@ -24,7 +23,6 @@ const firebaseConfig = {
   appId: "1:798185919710:web:bf420d718d7bc2b3e9de4f"
 };
 
-// Inicializamos la app aquí mismo
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
@@ -50,25 +48,20 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
       const data = doc.data();
       return {
         id: doc.id,
-        // Normalización para compatibilidad
         timestamp: data.timestamp || new Date().toISOString(),
         createdAt: data.timestamp || new Date().toISOString(),
         date: data.date || '',
-        
         operatorName: data.operatorName || data.operator || 'Desconocido',
         operator: data.operatorName || data.operator || 'Desconocido',
-        
         sector: data.sector,
         model: data.model,
         operation: data.operation,
         quantity: Number(data.quantity),
-        
         totalPoints: Number(data.totalPoints || data.points || 0),
         points: Number(data.totalPoints || data.points || 0),
-        
         startTime: data.startTime || '',
         endTime: data.endTime || '',
-        orderNumber: data.orderNumber || '' // <--- CAMPO NUEVO (N° ORDEN)
+        orderNumber: data.orderNumber || '' 
       } as ProductionLog;
     });
   } catch (error) {
@@ -77,12 +70,10 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
   }
 };
 
-// Alias de compatibilidad
 export const getProductionLogs = getLogs;
 
 export const saveLog = async (log: any) => {
   const { id, ...logData } = log;
-  // Guardamos con redundancia para asegurar compatibilidad
   const dataToSave = {
     ...logData,
     operator: logData.operatorName,
@@ -96,12 +87,9 @@ export const saveProductionLog = saveLog;
 export const updateProductionLog = async (log: Partial<ProductionLog> & { id: string }) => {
   const { id, ...data } = log;
   const docRef = doc(db, LOGS_COL, id);
-  
-  // Actualizamos campos redundantes si es necesario
   const updateData: any = { ...data };
   if (data.operatorName) updateData.operator = data.operatorName;
   if (data.totalPoints) updateData.points = data.totalPoints;
-
   await updateDoc(docRef, updateData);
 };
 
@@ -126,7 +114,6 @@ export const clearLogs = async (): Promise<void> => {
 const fetchList = async (docId: string): Promise<string[]> => {
   try {
     const d = await getDocs(collection(db, CONFIG_COL));
-    // Soporte para estructura de documento único 'lists' o múltiples documentos
     if (d.docs.find(d => d.id === 'lists')) {
        const listDoc = d.docs.find(d => d.id === 'lists');
        return listDoc?.data()?.[docId] || []; 
@@ -144,6 +131,31 @@ export const getOperations = async () => fetchList('operations');
 export const saveOperators = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'operators'), { list }); };
 export const saveModels = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'models'), { list }); };
 export const saveOperations = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'operations'), { list }); };
+
+// --- FUNCIÓN NUEVA: BORRAR OPERARIO Y SUS DATOS ---
+export const deleteOperatorWithData = async (operatorName: string) => {
+  try {
+    // 1. Eliminar de la lista
+    const currentOps = await getOperators();
+    const newOps = currentOps.filter(op => op !== operatorName);
+    await saveOperators(newOps);
+
+    // 2. Eliminar sus logs
+    const q = query(collection(db, LOGS_COL), where('operatorName', '==', operatorName));
+    const snapshot = await getDocs(q);
+    
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    
+    return true;
+  } catch (error) {
+    console.error("Error eliminando operario:", error);
+    return false;
+  }
+};
 
 export const getProductivityTarget = async (): Promise<number> => {
   try {
@@ -264,7 +276,6 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
   doc.setFontSize(10);
   doc.text(`Total Unidades: ${totalQty} | Total Puntos: ${totalPts.toFixed(1)}`, 14, 28);
 
-  // Tabla con N° Orden incluida
   const tableColumn = ["Fecha", "Orden", "Operario", "Modelo", "Operación", "Cant.", "Pts"];
   const tableRows = logs.map(log => [
     new Date(log.timestamp).toLocaleDateString(),
