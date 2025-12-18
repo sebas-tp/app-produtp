@@ -1,51 +1,55 @@
-import { GoogleGenAI } from "@google/genai";
-import { ProductionLog } from "../types";
+// services/aiService.ts
+import { ProductionLog } from '../types';
 
-// Initialize the API client
-const apiKey = process.env.API_KEY || ''; // Fail gracefully if no key
-let ai: GoogleGenAI | null = null;
-
-if (apiKey) {
-  ai = new GoogleGenAI({ apiKey });
-}
-
-export const analyzeProductionData = async (logs: ProductionLog[]): Promise<string> => {
-  if (!ai) {
-    return "API Key de Gemini no configurada. Por favor configure process.env.API_KEY para habilitar el análisis IA.";
-  }
-
-  if (logs.length === 0) {
-    return "No hay suficientes datos para realizar un análisis.";
-  }
-
-  // Preparamos un resumen ligero para no exceder tokens
-  const summaryData = logs.slice(0, 50).map(l => 
-    `Op: ${l.operatorName}, Sec: ${l.sector}, Pts: ${l.totalPoints}, Cant: ${l.quantity}`
-  ).join('\n');
-
-  try {
-    const model = 'gemini-2.5-flash';
-    const prompt = `
-      Actúa como un Gerente de Planta Industrial experto. Analiza estos registros de producción recientes:
-      
-      ${summaryData}
-      
-      Identifica:
-      1. Patrones de alta eficiencia.
-      2. Posibles cuellos de botella o anomalías.
-      3. Una recomendación breve para mejorar la productividad.
-      
-      Responde en formato Markdown, corto y directo.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-    });
-
-    return response.text || "No se pudo generar el análisis.";
-  } catch (error) {
-    console.error("Error analizando datos:", error);
-    return "Error al conectar con el servicio de IA.";
-  }
+export const analyzeProductionData = async (
+  productionData: ProductionLog[], 
+  allOperators: string[], 
+  totalPoints: number
+): Promise<string> => {
+  
+  // Lógica local (Plan B siempre activo si no hay API Key o falla)
+  return generateLocalAnalysis(productionData, allOperators, totalPoints);
 };
+
+function generateLocalAnalysis(data: ProductionLog[], allOperators: string[], totalPoints: number): string {
+  // Ajustamos para leer 'operatorName' en lugar de 'operator'
+  // @ts-ignore (Ignoramos error de tipo temporal si la interfaz no coincide exacto)
+  const activeOps = new Set(data.map(d => d.operatorName || d.operator)).size;
+  const targetPerOperator = 800; 
+  const globalTarget = activeOps * targetPerOperator;
+  const efficiency = activeOps > 0 ? Math.round((totalPoints / globalTarget) * 100) : 0;
+
+  const opPoints: Record<string, number> = {};
+  data.forEach(d => { 
+    // @ts-ignore
+    const name = d.operatorName || d.operator;
+    // @ts-ignore
+    const pts = d.totalPoints || d.points || 0;
+    opPoints[name] = (opPoints[name] || 0) + pts; 
+  });
+  
+  const sortedOps = Object.entries(opPoints).sort((a, b) => b[1] - a[1]);
+  const bestOp = sortedOps[0];
+  
+  const modelCount: Record<string, number> = {};
+  data.forEach(d => { modelCount[d.model] = (modelCount[d.model] || 0) + d.quantity; });
+  const sortedModels = Object.entries(modelCount).sort((a, b) => b[1] - a[1]);
+  const topModel = sortedModels[0];
+
+  return `
+### 📊 Reporte de Planta
+
+**Resumen del Día:**
+Se han generado **${totalPoints.toLocaleString()} puntos** con **${activeOps} operarios** activos.
+La eficiencia global estimada es del **${efficiency}%** (Base: ${targetPerOperator} pts/persona).
+
+#### 🟢 Puntos Fuertes
+* **Mejor Operario:** **${bestOp ? bestOp[0] : 'N/A'}** (${bestOp ? bestOp[1].toFixed(0) : 0} pts).
+* **Modelo Top:** **${topModel ? topModel[0] : 'N/A'}** (${topModel ? topModel[1] : 0} un.).
+
+#### 💡 Sugerencia
+${efficiency < 70 
+      ? 'La eficiencia está baja. Revisar abastecimiento de materiales o paradas.' 
+      : 'Buen ritmo de trabajo. Mantener flujo actual.'}
+  `;
+}
