@@ -3,21 +3,21 @@ import {
   getLogs, clearLogs, downloadCSV, downloadPDF, 
   getProductivityTarget, saveProductivityTarget, getOperators 
 } from '../services/dataService';
-// Importamos el servicio con el nombre correcto que tienes ahora
 import { analyzeProductionData } from '../services/geminiService';
 import { ProductionLog } from '../types';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts';
+// CORRECCIÓN: Agregué 'Trophy' a esta lista de imports
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
-  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck 
+  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy 
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export const ManagerDashboard: React.FC = () => {
-  // --- ESTADOS DE DATOS (Tu lógica original) ---
+  // --- ESTADOS DE DATOS ---
   const [allLogs, setAllLogs] = useState<ProductionLog[]>([]); 
   const [filteredLogs, setFilteredLogs] = useState<ProductionLog[]>([]); 
   const [operatorList, setOperatorList] = useState<string[]>([]);
@@ -37,15 +37,15 @@ export const ManagerDashboard: React.FC = () => {
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [tempTarget, setTempTarget] = useState<string>("24960");
 
-  // --- NUEVO: ESTADOS DE SEGURIDAD E IA ---
+  // --- SEGURIDAD E IA ---
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
-  const [isAuthorized, setIsAuthorized] = useState(false); // Si ya puso la clave en esta sesión
-  const [showEngineeringModal, setShowEngineeringModal] = useState(false); // El modal de IA
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [showEngineeringModal, setShowEngineeringModal] = useState(false);
   const [analysisResult, setAnalysisResult] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const MASTER_PASSWORD = "Ing.2026"; // <--- TU CONTRASEÑA DE INGENIERÍA
+  const MASTER_PASSWORD = "Ing.2026"; // <--- CAMBIAR CONTRASEÑA AQUI
 
   // --- CARGA INICIAL ---
   useEffect(() => {
@@ -102,7 +102,7 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  // --- TUS EXPORTACIONES ORIGINALES (Botones Normales) ---
+  // --- EXPORTACIONES ---
   const handleDownloadExcel = () => {
     const filename = `Reporte_${selectedOperator === 'all' ? 'Global' : selectedOperator}_${startDate}_al_${endDate}`;
     downloadCSV(filteredLogs, filename);
@@ -114,13 +114,11 @@ export const ManagerDashboard: React.FC = () => {
     downloadPDF(filteredLogs, title, filename);
   };
 
-  // --- LÓGICA DE INGENIERÍA / IA ---
+  // --- LÓGICA DE INGENIERÍA ---
   const handleEngineeringAccess = () => {
     if (isAuthorized) {
-      // Si ya autorizó antes, entra directo
       openEngineeringModal();
     } else {
-      // Si no, pide clave
       setShowAuthModal(true);
     }
   };
@@ -139,11 +137,8 @@ export const ManagerDashboard: React.FC = () => {
 
   const openEngineeringModal = async () => {
     setShowEngineeringModal(true);
-    // Ejecutamos análisis automáticamente al abrir si no hay uno previo
     if (!analysisResult) {
       setIsAnalyzing(true);
-      // Adaptador para que los datos coincidan con lo que espera el servicio
-      // El servicio espera array de logs, lista de operarios y puntos totales
       const totalPts = filteredLogs.reduce((sum, l) => sum + l.totalPoints, 0);
       const result = await analyzeProductionData(filteredLogs, operatorList, totalPts);
       setAnalysisResult(result);
@@ -152,7 +147,6 @@ export const ManagerDashboard: React.FC = () => {
   };
 
   const handleFullReportPDF = () => {
-    // Genera un PDF Especial con el texto de la IA + Datos
     const doc = new jsPDF();
     const title = `Reporte de Ingeniería TopSafe`;
     
@@ -164,22 +158,19 @@ export const ManagerDashboard: React.FC = () => {
 
     let startY = 40;
 
-    // Agregar texto de IA
     if (analysisResult) {
       doc.setFontSize(12);
-      doc.setTextColor(234, 88, 12); // Naranja
+      doc.setTextColor(234, 88, 12);
       doc.text("Análisis Inteligente (Gemini AI)", 14, startY);
       
       doc.setFontSize(10);
       doc.setTextColor(0);
-      // Limpiamos markdown básico
       const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/>/g, '');
       const splitText = doc.splitTextToSize(cleanText, 180);
       doc.text(splitText, 14, startY + 8);
       startY += 10 + (splitText.length * 5);
     }
 
-    // Agregar Tabla Resumida
     autoTable(doc, {
       startY: startY,
       head: [['Fecha', 'Operario', 'Sector', 'Modelo', 'Op', 'Pts']],
@@ -197,7 +188,7 @@ export const ManagerDashboard: React.FC = () => {
     doc.save('Reporte_Ingenieria_Full.pdf');
   };
 
-  // --- PREPARACIÓN GRÁFICOS (Tu código original) ---
+  // --- DATOS GRÁFICOS ---
   const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.operatorName]) {
       acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
@@ -238,7 +229,7 @@ export const ManagerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8 p-4 md:p-8">
-      {/* --- HEADER NORMAL (GERENCIA) --- */}
+      {/* HEADER */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
@@ -265,12 +256,11 @@ export const ManagerDashboard: React.FC = () => {
           </div>
 
           <div className="flex gap-2 w-full md:w-auto">
-             {/* Botones Estándar */}
              <button onClick={handleDownloadExcel} className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200" title="Excel"><FileDown className="w-5 h-5" /></button>
              <button onClick={handleDownloadStandardPDF} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="PDF Básico"><FileText className="w-5 h-5" /></button>
              <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"><RefreshCw className="w-5 h-5" /></button>
              
-             {/* BOTÓN INGENIERÍA (Con Candado) */}
+             {/* BOTÓN INGENIERÍA */}
              <div className="h-8 w-px bg-slate-300 mx-1"></div>
              <button 
                onClick={handleEngineeringAccess} 
@@ -283,7 +273,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* --- KPI CARDS (Tu diseño original) --- */}
+      {/* KPI CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
           <div className="flex justify-between items-start mb-2">
@@ -298,7 +288,7 @@ export const ManagerDashboard: React.FC = () => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Registros</p><p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p></div>
       </div>
 
-      {/* --- GRÁFICOS (Tu diseño original) --- */}
+      {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {selectedOperator === 'all' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
@@ -330,7 +320,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* --- HISTORIAL (Tabla original) --- */}
+      {/* HISTORIAL */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
          <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
          <div className="overflow-x-auto max-h-96">
@@ -354,7 +344,7 @@ export const ManagerDashboard: React.FC = () => {
          </div>
       </div>
 
-      {/* --- MODAL 1: CONTRASEÑA --- */}
+      {/* MODAL 1: CONTRASEÑA */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -373,12 +363,10 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* --- MODAL 2: INGENIERÍA / IA (Se abre al poner la clave) --- */}
+      {/* MODAL 2: MODO INGENIERÍA */}
       {showEngineeringModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in zoom-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
-            
-            {/* Header del Modal */}
             <div className="bg-gradient-to-r from-indigo-900 to-slate-900 p-6 flex justify-between items-center text-white shrink-0">
               <div className="flex items-center gap-4">
                 <div className="bg-indigo-500/20 p-2 rounded-lg"><BrainCircuit className="w-8 h-8 text-indigo-400"/></div>
@@ -390,18 +378,15 @@ export const ManagerDashboard: React.FC = () => {
               <button onClick={() => setShowEngineeringModal(false)} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><X className="w-6 h-6"/></button>
             </div>
 
-            {/* Cuerpo del Modal */}
             <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
-                
-                {/* Columna Izquierda: Reporte IA */}
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
                     <h4 className="text-lg font-bold text-indigo-900 mb-4 border-b pb-2">Análisis de Inteligencia Artificial</h4>
                     {isAnalyzing ? (
                       <div className="flex flex-col items-center justify-center py-12 text-slate-500">
                         <Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" />
-                        <p className="animate-pulse">Gemini está analizando {filteredLogs.length} registros...</p>
+                        <p className="animate-pulse">Analizando registros...</p>
                       </div>
                     ) : (
                       <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">
@@ -411,15 +396,11 @@ export const ManagerDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Columna Derecha: Acciones */}
                 <div className="space-y-6">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h4 className="font-bold text-slate-800 mb-4">Exportación Avanzada</h4>
                     <p className="text-sm text-slate-500 mb-6">Genera un documento oficial incluyendo el análisis de IA, gráficos estadísticos y tablas de datos completos.</p>
-                    <button 
-                      onClick={handleFullReportPDF} 
-                      className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-[1.02]"
-                    >
+                    <button onClick={handleFullReportPDF} className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-[1.02]">
                       <FileText className="w-5 h-5" /> DESCARGAR REPORTE COMPLETO
                     </button>
                   </div>
@@ -433,18 +414,15 @@ export const ManagerDashboard: React.FC = () => {
                     </ul>
                   </div>
                 </div>
-
               </div>
             </div>
 
-            {/* Footer Modal */}
             <div className="bg-white border-t p-4 flex justify-end shrink-0">
                <button onClick={() => setShowEngineeringModal(false)} className="text-slate-500 hover:text-slate-800 font-medium px-6">Volver al Dashboard</button>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
 };
