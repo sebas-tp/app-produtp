@@ -8,7 +8,7 @@ import {
 } from '../services/dataService';
 import { 
   Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
-  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare 
+  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp 
 } from 'lucide-react';
 
 export const OperatorForm: React.FC = () => {
@@ -20,6 +20,7 @@ export const OperatorForm: React.FC = () => {
   const [news, setNews] = useState<NewsItem[]>([]);
 
   const [currentViewLogs, setCurrentViewLogs] = useState<ProductionLog[]>([]); 
+  const [operatorHistory, setOperatorHistory] = useState<any[]>([]); // <--- NUEVO: Historial agrupado
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export const OperatorForm: React.FC = () => {
     startTime: '08:00', 
     endTime: '17:00',
     orderNumber: '',
-    comments: '' // <--- 1. NUEVO CAMPO EN EL ESTADO
+    comments: '' 
   });
 
   const [predictedPoints, setPredictedPoints] = useState<number>(0);
@@ -43,6 +44,10 @@ export const OperatorForm: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const totalPointsView = currentViewLogs.reduce((acc, log) => acc + log.totalPoints, 0);
+  
+  // NOTA: Si dailyTarget es la meta de PLANTA (ej: 24960), para un solo operario 
+  // el porcentaje se verá bajo. Ajusta esta lógica si tienes una meta individual.
+  // Por ahora comparamos contra la meta global o lo que configures.
   const progressPercent = dailyTarget > 0 ? (totalPointsView / dailyTarget) * 100 : 0;
   const isGoalReached = progressPercent >= 100;
 
@@ -64,12 +69,35 @@ export const OperatorForm: React.FC = () => {
 
   const loadLogsByDate = async () => {
     const allLogs = await getLogs();
+    
+    // 1. Logs para la tabla principal (Día seleccionado)
     const filtered = allLogs.filter(log => {
       const logDate = log.timestamp.split('T')[0];
       const matchesOperator = formData.operatorName ? log.operatorName === formData.operatorName : true;
       return logDate === selectedDate && matchesOperator;
     });
     setCurrentViewLogs(filtered);
+
+    // 2. NUEVO: Cálculo de Rendimiento Diario (Si hay operario seleccionado)
+    if (formData.operatorName) {
+      const groupedData: Record<string, number> = {};
+      
+      // Filtramos logs solo de este operario (de toda la historia)
+      const opLogs = allLogs.filter(l => l.operatorName === formData.operatorName);
+      
+      opLogs.forEach(log => {
+        const date = log.timestamp.split('T')[0];
+        groupedData[date] = (groupedData[date] || 0) + log.totalPoints;
+      });
+
+      // Convertimos a array y ordenamos por fecha descendente
+      const historyArray = Object.entries(groupedData)
+        .map(([date, points]) => ({ date, points }))
+        .sort((a, b) => b.date.localeCompare(a.date)) // Ordenar fechas descendente
+        .slice(0, 5); // Solo los últimos 5 días trabajados
+
+      setOperatorHistory(historyArray);
+    }
   };
 
   useEffect(() => {
@@ -93,7 +121,7 @@ export const OperatorForm: React.FC = () => {
       startTime: log.startTime || '08:00', 
       endTime: log.endTime || '17:00',
       orderNumber: log.orderNumber || '',
-      comments: log.comments || '' // <--- 2. CARGAR COMENTARIO AL EDITAR
+      comments: log.comments || '' 
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -113,7 +141,6 @@ export const OperatorForm: React.FC = () => {
 
   const handleCancelEdit = () => { 
     setEditingId(null); 
-    // Limpiamos comentario también
     setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' })); 
   };
 
@@ -142,14 +169,13 @@ export const OperatorForm: React.FC = () => {
       await loadLogsByDate();
       
       setEditingId(null); 
-      // Mantenemos Orden y Operario, limpiamos el resto (incluido comentario)
       setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' }));
       
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err) { console.error(err); setStatus('error'); } finally { setIsSaving(false); }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { const { name, value } = e.target; setFormData(prev => ({ ...prev, [name]: value })); };
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => { const { name, value } = e.target; setFormData(prev => ({ ...prev, [name]: value })); };
   const handleDownload = () => { const filename = `Produccion_${formData.operatorName || 'General'}_${selectedDate}`; downloadCSV(currentViewLogs, filename); };
 
   if (isLoading) return <div className="flex justify-center items-center h-64"><Loader2 className="w-10 h-10 animate-spin text-amber-500"/></div>;
@@ -175,6 +201,7 @@ export const OperatorForm: React.FC = () => {
         </div>
       )}
 
+      {/* --- FORMULARIO DE CARGA --- */}
       <div className={`bg-white rounded-xl shadow-lg overflow-hidden border-t-4 ${borderColor} transition-colors duration-300`}>
         <div className={`${headerBg} p-6 text-white flex justify-between items-center transition-colors duration-300`}>
           <div>
@@ -248,7 +275,6 @@ export const OperatorForm: React.FC = () => {
             </div>
           </div>
 
-          {/* --- 3. CAMPO DE OBSERVACIONES VISUAL --- */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1">
               <MessageSquare className="w-4 h-4 text-slate-400"/> Observaciones (Opcional)
@@ -276,26 +302,65 @@ export const OperatorForm: React.FC = () => {
         </form>
       </div>
 
-      {/* KPI TARGET */}
+      {/* --- GRID DE ESTADISTICAS --- */}
       {formData.operatorName && (
-        <div className="bg-white rounded-xl shadow-md p-6 border border-slate-200">
-          <div className="flex justify-between items-end mb-2">
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Target className="w-5 h-5 text-amber-600" />Meta Diaria: {dailyTarget.toLocaleString()} pts</h3>
-              <p className="text-sm text-slate-500">Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">{selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : new Date(selectedDate).toLocaleDateString()}</span></p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* TARJETA 1: PROGRESO DEL DÍA SELECCIONADO */}
+          <div className="bg-white rounded-xl shadow-md p-6 border border-slate-200 h-full">
+            <div className="flex justify-between items-end mb-2">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Target className="w-5 h-5 text-amber-600" />Meta Diaria: {dailyTarget.toLocaleString()} pts</h3>
+                <p className="text-sm text-slate-500">Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">{selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : new Date(selectedDate).toLocaleDateString()}</span></p>
+              </div>
+              <div className={`text-2xl font-black ${isGoalReached ? 'text-green-600' : 'text-slate-700'}`}>{progressPercent.toFixed(1)}%</div>
             </div>
-            <div className={`text-2xl font-black ${isGoalReached ? 'text-green-600' : 'text-slate-700'}`}>{progressPercent.toFixed(1)}%</div>
+            <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden"><div className={`h-full transition-all duration-1000 ${isGoalReached ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(progressPercent, 100)}%` }}></div></div>
+            {isGoalReached && <div className="mt-2 flex items-center gap-2 text-green-700 font-bold text-sm animate-bounce"><Trophy className="w-4 h-4" /> ¡Objetivo Cumplido!</div>}
           </div>
-          <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden"><div className={`h-full transition-all duration-1000 ${isGoalReached ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(progressPercent, 100)}%` }}></div></div>
-          {isGoalReached && <div className="mt-2 flex items-center gap-2 text-green-700 font-bold text-sm animate-bounce"><Trophy className="w-4 h-4" /> ¡Objetivo Cumplido!</div>}
+
+          {/* TARJETA 2: NUEVA TABLA DE RENDIMIENTO DIARIO */}
+          <div className="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200 h-full">
+             <div className="px-6 py-3 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-blue-600"/>
+                <h3 className="font-bold text-slate-800">Mi Rendimiento Reciente</h3>
+             </div>
+             <table className="w-full text-sm">
+               <thead className="bg-white text-xs text-slate-500 uppercase border-b border-slate-100">
+                 <tr>
+                   <th className="px-6 py-2 text-left">Fecha</th>
+                   <th className="px-6 py-2 text-right">Puntos</th>
+                   <th className="px-6 py-2 text-right">Efic. %</th>
+                 </tr>
+               </thead>
+               <tbody className="divide-y divide-slate-50">
+                 {operatorHistory.map((day, idx) => {
+                   // Calculamos el % de ese día histórico contra la meta actual
+                   const dayPercent = (day.points / dailyTarget) * 100;
+                   return (
+                     <tr key={idx} className="hover:bg-slate-50">
+                       <td className="px-6 py-2 font-medium text-slate-700">{new Date(day.date).toLocaleDateString()}</td>
+                       <td className="px-6 py-2 text-right">{day.points.toLocaleString()}</td>
+                       <td className="px-6 py-2 text-right">
+                         <span className={`px-2 py-1 rounded text-xs font-bold ${dayPercent >= 100 ? 'bg-green-100 text-green-700' : (dayPercent >= 80 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}`}>
+                           {dayPercent.toFixed(0)}%
+                         </span>
+                       </td>
+                     </tr>
+                   );
+                 })}
+                 {operatorHistory.length === 0 && <tr><td colSpan={3} className="px-6 py-4 text-center text-slate-400 italic">Sin registros previos.</td></tr>}
+               </tbody>
+             </table>
+          </div>
         </div>
       )}
 
-      {/* HISTORIAL */}
+      {/* HISTORIAL DETALLADO DEL DÍA */}
       {formData.operatorName && (
         <div className="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50">
-            <div><h3 className="font-bold text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-amber-600" /> Historial de Producción</h3></div>
+            <div><h3 className="font-bold text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-amber-600" /> Detalle de Tareas ({selectedDate})</h3></div>
             <div className="flex items-center gap-2">
                 <button onClick={handleDownload} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm" disabled={currentViewLogs.length === 0}><FileDown className="w-4 h-4" /> Excel</button>
             </div>
@@ -309,7 +374,6 @@ export const OperatorForm: React.FC = () => {
                   <th className="px-4 py-2">Operación</th>
                   <th className="px-4 py-2 text-right">Cant.</th>
                   <th className="px-4 py-2 text-right">Puntos</th>
-                  {/* 4. COLUMNA NUEVA EN TABLA */}
                   <th className="px-4 py-2">Obs.</th>
                   <th className="px-4 py-2 text-center">Acciones</th>
                 </tr>
@@ -322,12 +386,7 @@ export const OperatorForm: React.FC = () => {
                     <td className="px-4 py-2 text-slate-600">{log.operation}</td>
                     <td className="px-4 py-2 text-right font-bold">{log.quantity}</td>
                     <td className="px-4 py-2 text-right text-amber-600 font-bold">{log.totalPoints.toFixed(1)}</td>
-                    
-                    {/* CELDA DE COMENTARIOS */}
-                    <td className="px-4 py-2 text-xs text-slate-500 max-w-[120px] truncate" title={log.comments}>
-                      {log.comments || '-'}
-                    </td>
-
+                    <td className="px-4 py-2 text-xs text-slate-500 max-w-[120px] truncate" title={log.comments}>{log.comments || '-'}</td>
                     <td className="px-4 py-2 text-center flex items-center justify-center gap-1">
                       <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-blue-600 transition-colors p-1" title="Editar"><Pencil className="w-4 h-4" /></button>
                       <button onClick={() => handleDeleteClick(log.id!)} className="text-slate-400 hover:text-red-600 transition-colors p-1" title="Borrar"><Trash2 className="w-4 h-4" /></button>
