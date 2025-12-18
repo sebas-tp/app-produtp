@@ -7,13 +7,18 @@ import {
   addNews, deleteNews, getActiveNews, NewsItem 
 } from '../services/dataService';
 import { Sector, PointRule } from '../types';
-import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database } from 'lucide-react';
+import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check } from 'lucide-react';
 
-// --- SUB COMPONENTS FOR LIST MANAGEMENT ---
+// --- COMPONENTE GESTOR DE LISTAS (CON EDICIÓN) ---
 const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data: string[], onSave: (d: string[]) => void, icon: any }) => {
   const [newItem, setNewItem] = useState('');
   const [saving, setSaving] = useState(false);
+  
+  // Estados para la edición
+  const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
 
+  // Agregar nuevo
   const handleAdd = async () => {
     if (newItem.trim() && !data.includes(newItem)) {
       setSaving(true);
@@ -23,6 +28,7 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
     }
   };
 
+  // Borrar
   const handleDelete = async (item: string) => {
     if (window.confirm(`¿Está seguro de eliminar "${item}"?`)) {
       setSaving(true);
@@ -32,13 +38,43 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
     }
   };
 
+  // Iniciar Edición
+  const startEdit = (item: string) => {
+    setEditingItem(item);
+    setEditValue(item);
+  };
+
+  // Guardar Edición
+  const saveEdit = async () => {
+    if (!editValue.trim()) return;
+    if (editValue === editingItem) {
+      setEditingItem(null); // No hubo cambios
+      return;
+    }
+    if (data.includes(editValue)) {
+      alert("Este nombre ya existe en la lista.");
+      return;
+    }
+
+    setSaving(true);
+    // Reemplazamos el item viejo por el nuevo manteniendo el orden
+    const updatedList = data.map(item => item === editingItem ? editValue : item);
+    await onSave(updatedList);
+    setEditingItem(null);
+    setEditValue('');
+    setSaving(false);
+  };
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-full relative">
       {saving && <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center"><Loader2 className="animate-spin text-orange-600"/></div>}
+      
       <div className="flex items-center gap-2 mb-4 text-slate-800">
         <Icon className="w-5 h-5 text-orange-600" />
         <h3 className="font-bold">{title}</h3>
       </div>
+
+      {/* Input para agregar nuevo */}
       <div className="flex gap-2 mb-4">
         <input 
           type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)}
@@ -49,16 +85,42 @@ const ListManager = ({ title, data, onSave, icon: Icon }: { title: string, data:
           <Plus className="w-5 h-5" />
         </button>
       </div>
-      <div className="space-y-2 max-h-60 overflow-y-auto">
+
+      {/* Lista de items */}
+      <div className="space-y-2 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
         {data.map((item) => (
-          <div key={item} className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded text-sm group">
-            <span className="text-slate-700 font-medium">{item}</span>
-            <button onClick={() => handleDelete(item)} type="button" className="text-slate-400 hover:text-red-500 p-2 rounded hover:bg-red-50 transition-colors">
-              <Trash2 className="w-4 h-4" />
-            </button>
+          <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group transition-colors ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
+            
+            {editingItem === item ? (
+              // MODO EDICIÓN
+              <div className="flex w-full items-center gap-2">
+                <input 
+                  type="text" 
+                  value={editValue} 
+                  onChange={(e) => setEditValue(e.target.value)}
+                  className="flex-1 bg-white border border-blue-300 rounded px-2 py-1 text-slate-900 outline-none text-xs font-bold"
+                  autoFocus
+                />
+                <button onClick={saveEdit} className="text-green-600 hover:bg-green-100 p-1 rounded"><Check className="w-4 h-4"/></button>
+                <button onClick={() => setEditingItem(null)} className="text-red-500 hover:bg-red-100 p-1 rounded"><X className="w-4 h-4"/></button>
+              </div>
+            ) : (
+              // MODO VISUALIZACIÓN
+              <>
+                <span className="text-slate-700 font-medium truncate flex-1">{item}</span>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => startEdit(item)} type="button" className="text-slate-400 hover:text-blue-600 p-1.5 rounded hover:bg-blue-50 transition-colors" title="Editar">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleDelete(item)} type="button" className="text-slate-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors" title="Eliminar">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ))}
-        {data.length === 0 && <p className="text-slate-400 text-xs italic">Sin elementos</p>}
+        {data.length === 0 && <p className="text-slate-400 text-xs italic text-center py-4">Lista vacía</p>}
       </div>
     </div>
   );
@@ -149,7 +211,7 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
   };
 
-  // ... Función de Carga Masiva (MEJORADA) ...
+  // ... Función de Carga Masiva ...
   const handleBulkImport = async () => {
     if (!jsonImport) return;
     if (!window.confirm("¿Importar datos? Esto agregará reglas nuevas y actualizará las listas de modelos y operaciones.")) return;
@@ -166,13 +228,7 @@ export const AdminPanel: React.FC = () => {
       for (const item of data) {
         if (item.sector && item.model && item.operation && item.pointsPerUnit) {
           const formattedSector = item.sector.charAt(0).toUpperCase() + item.sector.slice(1).toLowerCase();
-          
-          // Verificar si ya existe para no duplicar
-          const exists = matrix.some(r => 
-            r.sector === formattedSector && 
-            r.model === item.model.toString() && 
-            r.operation === item.operation
-          );
+          const exists = matrix.some(r => r.sector === formattedSector && r.model === item.model.toString() && r.operation === item.operation);
 
           if (!exists) {
             await addPointRule({
@@ -188,21 +244,16 @@ export const AdminPanel: React.FC = () => {
         }
       }
 
-      // 2. Actualizar Catálogos (Listas) Automáticamente
-      // Extraemos modelos y operaciones únicos del JSON
+      // 2. Actualizar Catálogos
       const jsonModels = data.map((i: any) => i.model.toString());
       const jsonOperations = data.map((i: any) => i.operation);
-
-      // Combinamos con los que ya existían para no borrar nada
       const updatedModels = Array.from(new Set([...models, ...jsonModels])).sort();
       const updatedOperations = Array.from(new Set([...operations, ...jsonOperations])).sort();
 
-      // Guardamos en Firebase
       await saveModels(updatedModels);
       await saveOperations(updatedOperations);
 
-      alert(`Proceso finalizado:\n- Reglas agregadas: ${addedCount}\n- Reglas omitidas (ya existían): ${skippedCount}\n- Catálogos actualizados correctamente.`);
-      
+      alert(`Proceso finalizado:\n- Reglas agregadas: ${addedCount}\n- Reglas omitidas (ya existían): ${skippedCount}\n- Catálogos actualizados.`);
       setJsonImport('');
       await loadData();
     } catch (e) {
