@@ -38,7 +38,7 @@ export const ManagerDashboard: React.FC = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [pendingAction, setPendingAction] = useState<'ai' | 'pdf' | null>(null);
-  const MASTER_PASSWORD = "admin"; // <--- ¡CAMBIA ESTA CONTRASEÑA!
+  const MASTER_PASSWORD = "Ing.2026"; // <--- ¡CAMBIA ESTA CONTRASEÑA!
 
   // --- IA Y MODAL ---
   const [analysisResult, setAnalysisResult] = useState<string>('');
