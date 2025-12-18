@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
-  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash 
+  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity 
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -106,26 +106,10 @@ export const ManagerDashboard: React.FC = () => {
     downloadCSV(filteredLogs, filename);
   };
 
-  // --- PDF BÁSICO (Actualizado con Orden) ---
   const handleDownloadStandardPDF = () => {
-    const doc = new jsPDF();
-    doc.text(`Reporte: ${startDate} al ${endDate}`, 14, 20);
-    
-    autoTable(doc, {
-      startY: 30,
-      // AGREGAMOS LA COLUMNA 'ORDEN'
-      head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Cant', 'Pts']],
-      body: filteredLogs.map(l => [
-        new Date(l.timestamp).toLocaleDateString(),
-        l.orderNumber || '-', // Muestra guion si no hay orden
-        l.operatorName,
-        l.sector,
-        l.model,
-        l.quantity,
-        l.totalPoints.toFixed(1)
-      ]),
-    });
-    doc.save('Reporte_Basico.pdf');
+    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
+    const filename = `Reporte_${startDate}_al_${endDate}`;
+    downloadPDF(filteredLogs, title, filename);
   };
 
   const handleEngineeringAccess = () => {
@@ -162,7 +146,6 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  // --- PDF COMPLETO (Actualizado con Orden) ---
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
@@ -217,7 +200,6 @@ export const ManagerDashboard: React.FC = () => {
 
     autoTable(doc, {
       startY: 25,
-      // AGREGAMOS LA COLUMNA 'ORDEN' AQUÍ TAMBIÉN
       head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts']],
       body: filteredLogs.map(l => [
         new Date(l.timestamp).toLocaleDateString(),
@@ -234,6 +216,7 @@ export const ManagerDashboard: React.FC = () => {
     setIsGeneratingPDF(false);
   };
 
+  // DATOS CALCULADOS
   const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.operatorName]) {
       acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
@@ -330,21 +313,51 @@ export const ManagerDashboard: React.FC = () => {
 
       {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {selectedOperator === 'all' && (
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
-            <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
-            <div className="overflow-y-auto flex-1 pr-2 space-y-3">
-               {operatorStats.map((stat) => (
-                 <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                   <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.percentage.toFixed(0)}%</span></div>
-                   <div className="w-full bg-slate-200 rounded-full h-2"><div className={`h-full ${stat.percentage >= 100 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
-                 </div>
-               ))}
-            </div>
-          </div>
-        )}
+        
+        {/* PANEL LATERAL: RANKING O TABLA DIARIA */}
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
+          {selectedOperator === 'all' ? (
+            // VISTA GLOBAL: MOSTRAR RANKING
+            <>
+              <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking del Período</h3>
+              <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+                 {operatorStats.map((stat) => (
+                   <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                     <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
+                     <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+                   </div>
+                 ))}
+              </div>
+            </>
+          ) : (
+            // VISTA INDIVIDUAL: MOSTRAR TABLA DIARIA
+            <>
+              <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Eficiencia Diaria</h3>
+              <div className="overflow-y-auto flex-1">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                    <tr><th className="p-2 text-left">Fecha</th><th className="p-2 text-right">Pts</th><th className="p-2 text-right">%</th></tr>
+                  </thead>
+                  <tbody>
+                    {dailyTrend.map((day) => {
+                      const eff = (day.points / dailyTarget) * 100;
+                      return (
+                        <tr key={day.fullDate} className="border-b border-slate-50">
+                          <td className="p-2 font-medium">{day.name}</td>
+                          <td className="p-2 text-right">{day.points.toFixed(0)}</td>
+                          <td className="p-2 text-right"><span className={`px-1.5 py-0.5 rounded text-xs font-bold ${eff>=100?'bg-green-100 text-green-700':(eff>=80?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-700')}`}>{eff.toFixed(0)}%</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
 
-        <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 ${selectedOperator === 'all' ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
+        {/* GRÁFICO DE TENDENCIA */}
+        <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 lg:col-span-2`}>
           <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={dailyTrend}>
@@ -388,14 +401,13 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* HISTORIAL DETALLADO (En Pantalla) */}
+      {/* HISTORIAL DETALLADO */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
          <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
          <div className="overflow-x-auto max-h-96">
             <table className="w-full text-sm text-left text-slate-600">
                <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
                   <tr>
-                    {/* COLUMNA ORDEN AGREGADA */}
                     <th className="px-6 py-3">Fecha</th>
                     <th className="px-6 py-3">Orden</th>
                     <th className="px-6 py-3">Operario</th>
@@ -409,7 +421,6 @@ export const ManagerDashboard: React.FC = () => {
                   {filteredLogs.slice(0, 100).map(log => (
                      <tr key={log.id} className="border-b hover:bg-slate-50">
                         <td className="px-6 py-4">{new Date(log.timestamp).toLocaleDateString()}</td>
-                        {/* CELDA ORDEN AGREGADA */}
                         <td className="px-6 py-4 font-mono text-xs">{log.orderNumber || '-'}</td>
                         <td className="px-6 py-4 font-bold">{log.operatorName}</td>
                         <td className="px-6 py-4"><span className="bg-slate-100 px-2 py-1 rounded text-xs">{log.sector}</span></td>
