@@ -3,12 +3,12 @@ import { Sector, ProductionLog, PointRule } from '../types';
 import { 
   getPointRuleSync, saveLog, getLogs, 
   getOperators, getModels, getOperations, getPointsMatrix, downloadCSV,
-  updateProductionLog, deleteProductionLog, // <--- IMPORTADO AQUI
+  updateProductionLog, deleteProductionLog, 
   getProductivityTarget, getActiveNews, NewsItem 
 } from '../services/dataService';
 import { 
   Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
-  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2 // <--- IMPORTADO AQUI
+  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare 
 } from 'lucide-react';
 
 export const OperatorForm: React.FC = () => {
@@ -34,7 +34,8 @@ export const OperatorForm: React.FC = () => {
     quantity: '', 
     startTime: '08:00', 
     endTime: '17:00',
-    orderNumber: ''
+    orderNumber: '',
+    comments: '' // <--- 1. NUEVO CAMPO EN EL ESTADO
   });
 
   const [predictedPoints, setPredictedPoints] = useState<number>(0);
@@ -91,19 +92,17 @@ export const OperatorForm: React.FC = () => {
       quantity: log.quantity.toString(), 
       startTime: log.startTime || '08:00', 
       endTime: log.endTime || '17:00',
-      orderNumber: log.orderNumber || ''
+      orderNumber: log.orderNumber || '',
+      comments: log.comments || '' // <--- 2. CARGAR COMENTARIO AL EDITAR
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // --- NUEVA FUNCIÓN DE BORRADO ---
   const handleDeleteClick = async (id: string) => {
     if (window.confirm("¿Estás seguro de que quieres BORRAR este registro?")) {
       try {
         await deleteProductionLog(id);
-        // Si estamos editando justo el que borramos, cancelamos la edición
         if (editingId === id) handleCancelEdit();
-        // Recargamos la tabla
         await loadLogsByDate();
       } catch (error) {
         console.error("Error al borrar:", error);
@@ -114,7 +113,8 @@ export const OperatorForm: React.FC = () => {
 
   const handleCancelEdit = () => { 
     setEditingId(null); 
-    setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' })); 
+    // Limpiamos comentario también
+    setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' })); 
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -142,7 +142,8 @@ export const OperatorForm: React.FC = () => {
       await loadLogsByDate();
       
       setEditingId(null); 
-      setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' }));
+      // Mantenemos Orden y Operario, limpiamos el resto (incluido comentario)
+      setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' }));
       
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err) { console.error(err); setStatus('error'); } finally { setIsSaving(false); }
@@ -246,8 +247,23 @@ export const OperatorForm: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* --- 3. CAMPO DE OBSERVACIONES VISUAL --- */}
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-1">
+              <MessageSquare className="w-4 h-4 text-slate-400"/> Observaciones (Opcional)
+            </label>
+            <input 
+              type="text" 
+              name="comments" 
+              value={formData.comments} 
+              onChange={handleChange} 
+              placeholder="Ej: Se cortó la luz, Máquina lenta, etc." 
+              className="w-full rounded-lg border-slate-300 border p-3 focus:ring-2 focus:ring-slate-400 outline-none text-slate-700 text-sm"
+            />
+          </div>
           
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-2">
             {editingId && <button type="button" onClick={handleCancelEdit} className="w-1/3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-4 rounded-xl transition-colors flex justify-center items-center gap-2"><X className="w-5 h-5" /> Cancelar</button>}
             <button type="submit" disabled={isSaving} className={`flex-1 ${editingId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-500 hover:bg-amber-600'} text-white font-black text-lg py-4 rounded-xl shadow-lg transform active:scale-95 transition-all flex justify-center items-center gap-2 disabled:opacity-50`}>
               {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : (editingId ? <RefreshCw className="w-6 h-6" /> : <Save className="w-6 h-6" />)}
@@ -291,9 +307,10 @@ export const OperatorForm: React.FC = () => {
                   <th className="px-4 py-2">Orden</th>
                   <th className="px-4 py-2">Modelo</th>
                   <th className="px-4 py-2">Operación</th>
-                  <th className="px-4 py-2 text-center">Horario</th>
                   <th className="px-4 py-2 text-right">Cant.</th>
                   <th className="px-4 py-2 text-right">Puntos</th>
+                  {/* 4. COLUMNA NUEVA EN TABLA */}
+                  <th className="px-4 py-2">Obs.</th>
                   <th className="px-4 py-2 text-center">Acciones</th>
                 </tr>
               </thead>
@@ -303,9 +320,14 @@ export const OperatorForm: React.FC = () => {
                     <td className="px-4 py-2 text-slate-500 font-mono text-xs font-bold">{log.orderNumber || '-'}</td>
                     <td className="px-4 py-2 font-medium text-slate-700">{log.model}</td>
                     <td className="px-4 py-2 text-slate-600">{log.operation}</td>
-                    <td className="px-4 py-2 text-center text-slate-500 text-xs">{log.startTime} - {log.endTime}</td>
                     <td className="px-4 py-2 text-right font-bold">{log.quantity}</td>
                     <td className="px-4 py-2 text-right text-amber-600 font-bold">{log.totalPoints.toFixed(1)}</td>
+                    
+                    {/* CELDA DE COMENTARIOS */}
+                    <td className="px-4 py-2 text-xs text-slate-500 max-w-[120px] truncate" title={log.comments}>
+                      {log.comments || '-'}
+                    </td>
+
                     <td className="px-4 py-2 text-center flex items-center justify-center gap-1">
                       <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-blue-600 transition-colors p-1" title="Editar"><Pencil className="w-4 h-4" /></button>
                       <button onClick={() => handleDeleteClick(log.id!)} className="text-slate-400 hover:text-red-600 transition-colors p-1" title="Borrar"><Trash2 className="w-4 h-4" /></button>
@@ -314,7 +336,7 @@ export const OperatorForm: React.FC = () => {
                 ))}
                 {currentViewLogs.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400 italic">No hay registros para la fecha seleccionada.</td></tr>}
               </tbody>
-              {currentViewLogs.length > 0 && <tfoot className="bg-slate-50 font-bold text-slate-800"><tr><td colSpan={5} className="px-4 py-2 text-right">TOTAL DEL DÍA:</td><td className="px-4 py-2 text-right">{currentViewLogs.reduce((a,b) => a + b.quantity, 0)}</td><td className="px-4 py-2 text-right text-amber-600">{totalPointsView.toFixed(1)}</td><td></td></tr></tfoot>}
+              {currentViewLogs.length > 0 && <tfoot className="bg-slate-50 font-bold text-slate-800"><tr><td colSpan={4} className="px-4 py-2 text-right">TOTAL DEL DÍA:</td><td className="px-4 py-2 text-right">{currentViewLogs.reduce((a,b) => a + b.quantity, 0)}</td><td className="px-4 py-2 text-right text-amber-600">{totalPointsView.toFixed(1)}</td><td colSpan={2}></td></tr></tfoot>}
             </table>
           </div>
         </div>
