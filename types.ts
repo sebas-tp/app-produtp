@@ -31,10 +31,11 @@ export interface ProductionLog {
   quantity: number;
   totalPoints: number;
   
-  // --- NUEVO CAMPO AGREGADO ---
+  // --- CAMPOS NUEVOS ---
   orderNumber?: string; 
+  comments?: string; // <--- NUEVO CAMPO DE OBSERVACIONES
   
-  // Campos de compatibilidad (opcionales para evitar errores si usas componentes viejos)
+  // Campos de compatibilidad (opcionales)
   date?: string; 
   operator?: string;
   points?: number;
