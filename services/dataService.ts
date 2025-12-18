@@ -5,6 +5,10 @@ import { POINTS_MATRIX as DEFAULT_MATRIX, OPERATORS as DEFAULT_OPS, MODELS as DE
 import { ProductionLog, Sector, PointRule } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+// En services/dataService.ts
+
+// ... tus otros imports ...
+import { deleteDoc, doc } from 'firebase/firestore'; // Asegúrate de que esto esté importado arriba
 
 // Collections
 const LOGS_COL = 'production_logs';
@@ -256,4 +260,10 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
     styles: { fontSize: 9 },
   });
   doc.save(`${filename}.pdf`);
+};
+// ... tus otras funciones ...
+
+// AGREGA ESTA FUNCIÓN:
+export const deleteProductionLog = async (id: string) => {
+  await deleteDoc(doc(db, 'production_logs', id));
 };
