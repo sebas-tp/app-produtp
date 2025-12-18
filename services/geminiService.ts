@@ -7,7 +7,7 @@ export const analyzeProductionData = async (
   selectedOperator: string           
 ): Promise<string> => {
   
-  // Simulamos tiempo de análisis
+  // Simulamos "pensando..."
   await new Promise(resolve => setTimeout(resolve, 1500));
 
   return generateSmartReport(currentData, allData, selectedOperator);
@@ -15,7 +15,8 @@ export const analyzeProductionData = async (
 
 function generateSmartReport(currentData: ProductionLog[], allData: ProductionLog[], selectedOp: string): string {
   // 1. CÁLCULOS GLOBALES (Contexto de Planta)
-  const globalPoints = allData.reduce((sum, d) => sum + (d.points || 0), 0);
+  // CORRECCIÓN: Usamos (d as any) para leer totalPoints o points sin error de TS
+  const globalPoints = allData.reduce((sum, d) => sum + (Number((d as any).totalPoints || (d as any).points || 0)), 0);
   
   // Agrupamos puntos por operario (Global)
   const globalOpStats: Record<string, number> = {};
@@ -23,7 +24,7 @@ function generateSmartReport(currentData: ProductionLog[], allData: ProductionLo
     // @ts-ignore
     const name = d.operator || d.operatorName || 'N/A';
     // @ts-ignore
-    const pts = Number(d.points || d.totalPoints || 0);
+    const pts = Number(d.totalPoints || d.points || 0);
     globalOpStats[name] = (globalOpStats[name] || 0) + pts;
   });
 
@@ -91,7 +92,6 @@ function generateSmartReport(currentData: ProductionLog[], allData: ProductionLo
 
     report += `\n**📉 OPORTUNIDADES DE MEJORA:**\n`;
     
-    // CORRECCIÓN: Aquí estaba el error del espacio en la variable
     const bottomPerformers = ranking.filter(r => r.points > 0).slice(-3).reverse();
     
     if (bottomPerformers.length > 0) {
