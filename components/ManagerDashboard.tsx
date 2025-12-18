@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 // Usamos tus imports originales de servicios
 import { getLogs, clearLogs, downloadCSV, getProductivityTarget, saveProductivityTarget, getOperators } from '../services/dataService';
-// Importamos el nuevo servicio de IA (asegúrate que el archivo exista en services/aiService.ts)
-import { analyzeProductionData } from '../services/aiService';
+// Importamos el nuevo servicio de IA (asegúrate que el archivo exista en services/geminiService.ts)
+import { analyzeProductionData } from '../services/geminiService';
 import { ProductionLog } from '../types';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
