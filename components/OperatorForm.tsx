@@ -3,7 +3,7 @@ import { Sector, ProductionLog, PointRule } from '../types';
 import { 
   calculatePointsSync, getPointRuleSync, saveLog, getLogs, 
   getOperators, getModels, getOperations, getPointsMatrix, downloadCSV,
-  updateProductionLog, getProductivityTarget, getActiveNews, NewsItem // <--- IMPORTANTE
+  updateProductionLog, getProductivityTarget, getActiveNews, NewsItem 
 } from '../services/dataService';
 import { Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, Pencil, X, RefreshCw, Trophy, Target, Calendar, Bell, Megaphone } from 'lucide-react';
 
@@ -21,6 +21,8 @@ export const OperatorForm: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  
+  // FECHA SELECCIONADA (Por defecto HOY)
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [formData, setFormData] = useState({
@@ -49,11 +51,13 @@ export const OperatorForm: React.FC = () => {
     initData();
   }, []);
 
+  // Recargar logs si cambia la fecha o el operario
   useEffect(() => { if (!isLoading) loadLogsByDate(); }, [formData.operatorName, selectedDate]);
 
   const loadLogsByDate = async () => {
     const allLogs = await getLogs();
     const filtered = allLogs.filter(log => {
+      // Filtramos por la fecha seleccionada (no necesariamente hoy)
       const logDate = log.timestamp.split('T')[0];
       const matchesOperator = formData.operatorName ? log.operatorName === formData.operatorName : true;
       return logDate === selectedDate && matchesOperator;
@@ -70,9 +74,14 @@ export const OperatorForm: React.FC = () => {
 
   const handleEditClick = (log: ProductionLog) => {
     setEditingId(log.id);
+    // Al editar, también cambiamos la fecha seleccionada a la fecha del registro para no perderlo de vista
+    const logDate = log.timestamp.split('T')[0];
+    setSelectedDate(logDate);
+    
     setFormData({ operatorName: log.operatorName, sector: log.sector, model: log.model, operation: log.operation, quantity: log.quantity.toString(), startTime: log.startTime, endTime: log.endTime });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
   const handleCancelEdit = () => { setEditingId(null); setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' })); };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -82,14 +91,32 @@ export const OperatorForm: React.FC = () => {
 
     setIsSaving(true);
     try {
-      const logData = { timestamp: new Date().toISOString(), ...formData, quantity: parseInt(formData.quantity), totalPoints: predictedPoints };
+      // 1. CONSTRUIR TIMESTAMP CON LA FECHA SELECCIONADA
+      const now = new Date(); // Hora actual para mantener orden de carga
+      const [year, month, day] = selectedDate.split('-').map(Number);
+      
+      // Creamos la fecha usando la seleccionada + la hora actual
+      const entryDate = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+      
+      const logData = { 
+        timestamp: entryDate.toISOString(), // <--- ESTO ES LO QUE CAMBIÓ (Usa fecha elegida)
+        ...formData, 
+        quantity: parseInt(formData.quantity), 
+        totalPoints: predictedPoints 
+      };
+
       if (editingId) await updateProductionLog({ id: editingId, ...logData });
       else await saveLog({ id: crypto.randomUUID(), ...logData });
 
       setStatus('success');
-      const today = new Date().toISOString().split('T')[0];
-      if (selectedDate !== today) setSelectedDate(today); else await loadLogsByDate();
-      setEditingId(null); setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' }));
+      
+      // 2. YA NO RESETEAMOS LA FECHA A HOY. Mantenemos selectedDate.
+      await loadLogsByDate(); // Solo recargamos la tabla
+      
+      setEditingId(null); 
+      // Limpiamos solo cantidad, modelo y operación para carga rápida del mismo día
+      setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' }));
+      
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err) { console.error(err); setStatus('error'); } finally { setIsSaving(false); }
   };
@@ -127,11 +154,24 @@ export const OperatorForm: React.FC = () => {
           <div>
             <h2 className="text-xl font-bold flex items-center gap-2">
               {editingId ? <RefreshCw className="w-6 h-6 animate-spin-slow" /> : <Clock className="w-6 h-6" />} 
-              {editingId ? 'EDITANDO REGISTRO' : 'Registro Diario'}
+              {editingId ? 'EDITANDO REGISTRO' : 'Registro de Producción'}
             </h2>
-            <p className="text-slate-200 text-sm">{editingId ? 'Modifique los valores y guarde los cambios' : 'Carga de producción individual'}</p>
+            <p className="text-slate-200 text-sm">{editingId ? 'Modifique los valores y guarde los cambios' : 'Complete los datos de la tarea realizada'}</p>
           </div>
-          <div className={`text-slate-900 text-xs font-bold px-2 py-1 rounded ${editingId ? 'bg-blue-200' : 'bg-amber-500'}`}>{editingId ? 'MODO EDICIÓN' : 'OPERARIO'}</div>
+          
+          {/* NUEVO: SELECTOR DE FECHA EN EL HEADER */}
+          <div className="flex flex-col items-end">
+             <label className="text-[10px] uppercase font-bold text-slate-300 mb-1">Fecha de Trabajo</label>
+             <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm p-1 rounded-lg border border-white/20">
+               <Calendar className="w-4 h-4 text-white" />
+               <input 
+                 type="date" 
+                 value={selectedDate} 
+                 onChange={(e) => setSelectedDate(e.target.value)} 
+                 className="bg-transparent text-white font-bold text-sm outline-none color-white-calendar"
+               />
+             </div>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
@@ -142,21 +182,26 @@ export const OperatorForm: React.FC = () => {
               {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
             </select>
           </div>
+          
           <div className="grid grid-cols-2 gap-4">
             <div><label className="block text-sm font-bold text-slate-700 mb-1">Hora Inicio</label><input type="time" name="startTime" value={formData.startTime} onChange={handleChange} className="w-full rounded-lg border-slate-300 border p-3 bg-white text-slate-900"/></div>
             <div><label className="block text-sm font-bold text-slate-700 mb-1">Hora Fin</label><input type="time" name="endTime" value={formData.endTime} onChange={handleChange} className="w-full rounded-lg border-slate-300 border p-3 bg-white text-slate-900"/></div>
           </div>
+          
           <div className="border-t border-slate-100 my-4"></div>
+          
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">Sector</label>
             <select name="sector" value={formData.sector} onChange={handleChange} className="w-full rounded-lg border-amber-200 border-2 p-3 bg-amber-50 font-bold text-slate-900">
               {Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-sm font-bold text-slate-700 mb-1">Modelo / Producto</label><select name="model" value={formData.model} onChange={handleChange} className="w-full rounded-lg border-slate-300 border p-3 text-slate-900 bg-white" required><option value="">Seleccionar...</option>{modelList.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
             <div><label className="block text-sm font-bold text-slate-700 mb-1">Operación Realizada</label><select name="operation" value={formData.operation} onChange={handleChange} className="w-full rounded-lg border-slate-300 border p-3 text-slate-900 bg-white" required><option value="">Seleccionar...</option>{operationList.map(op => <option key={op} value={op}>{op}</option>)}</select></div>
           </div>
+          
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">CANTIDAD (Unidades)</label>
             <div className="flex items-center gap-4">
@@ -168,6 +213,7 @@ export const OperatorForm: React.FC = () => {
               </div>
             </div>
           </div>
+          
           <div className="flex gap-3">
             {editingId && <button type="button" onClick={handleCancelEdit} className="w-1/3 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-4 rounded-xl transition-colors flex justify-center items-center gap-2"><X className="w-5 h-5" /> Cancelar</button>}
             <button type="submit" disabled={isSaving} className={`flex-1 ${editingId ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-500 hover:bg-amber-600'} text-white font-black text-lg py-4 rounded-xl shadow-lg transform active:scale-95 transition-all flex justify-center items-center gap-2 disabled:opacity-50`}>
@@ -175,6 +221,7 @@ export const OperatorForm: React.FC = () => {
               {isSaving ? 'GUARDANDO...' : (editingId ? 'ACTUALIZAR REGISTRO' : 'CONFIRMAR PRODUCCIÓN')}
             </button>
           </div>
+          
           {status === 'success' && <div className="flex items-center gap-2 text-green-800 bg-green-100 p-4 rounded-lg animate-pulse border border-green-200"><CheckCircle className="w-6 h-6" /><span className="font-bold">{editingId ? '¡Actualizado correctamente!' : '¡Guardado correctamente!'}</span></div>}
           {status === 'error' && <div className="flex items-center gap-2 text-red-800 bg-red-100 p-4 rounded-lg border border-red-200"><AlertCircle className="w-6 h-6" /><span className="font-bold">Error al guardar. Verifique conexión.</span></div>}
         </form>
@@ -186,7 +233,7 @@ export const OperatorForm: React.FC = () => {
           <div className="flex justify-between items-end mb-2">
             <div>
               <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Target className="w-5 h-5 text-amber-600" />Meta Diaria: {dailyTarget.toLocaleString()} pts</h3>
-              <p className="text-sm text-slate-500">Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">{selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : selectedDate}</span></p>
+              <p className="text-sm text-slate-500">Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">{selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : new Date(selectedDate).toLocaleDateString()}</span></p>
             </div>
             <div className={`text-2xl font-black ${isGoalReached ? 'text-green-600' : 'text-slate-700'}`}>{progressPercent.toFixed(1)}%</div>
           </div>
@@ -201,7 +248,6 @@ export const OperatorForm: React.FC = () => {
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50">
             <div><h3 className="font-bold text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-amber-600" /> Historial de Producción</h3></div>
             <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-300 shadow-sm"><Calendar className="w-4 h-4 text-slate-500" /><input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent text-sm text-slate-700 font-medium outline-none"/></div>
                 <button onClick={handleDownload} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm" disabled={currentViewLogs.length === 0}><FileDown className="w-4 h-4" /> Excel</button>
             </div>
           </div>
