@@ -10,20 +10,18 @@ import {
 } from 'recharts';
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
-  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy 
+  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash 
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 
 export const ManagerDashboard: React.FC = () => {
-  // --- ESTADOS DE DATOS ---
   const [allLogs, setAllLogs] = useState<ProductionLog[]>([]); 
   const [filteredLogs, setFilteredLogs] = useState<ProductionLog[]>([]); 
   const [operatorList, setOperatorList] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // --- FILTROS ---
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
@@ -32,12 +30,10 @@ export const ManagerDashboard: React.FC = () => {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedOperator, setSelectedOperator] = useState<string>('all');
 
-  // --- META ---
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [tempTarget, setTempTarget] = useState<string>("24960");
 
-  // --- SEGURIDAD E IA ---
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [isAuthorized, setIsAuthorized] = useState(false);
@@ -46,9 +42,8 @@ export const ManagerDashboard: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  const MASTER_PASSWORD = "admin"; // CAMBIAR CONTRASEÑA
+  const MASTER_PASSWORD = "admin";
 
-  // --- CARGA INICIAL ---
   useEffect(() => {
     const init = async () => {
       setLoading(true);
@@ -66,10 +61,8 @@ export const ManagerDashboard: React.FC = () => {
     init();
   }, []);
 
-  // FILTROS Y LIMPIEZA DE ANÁLISIS
   useEffect(() => { 
     applyFilters(); 
-    // Limpiamos el análisis al cambiar filtros para obligar a regenerar
     setAnalysisResult(''); 
   }, [allLogs, startDate, endDate, selectedOperator]);
 
@@ -90,7 +83,6 @@ export const ManagerDashboard: React.FC = () => {
     setFilteredLogs(filtered);
   };
 
-  // --- FUNCIONES DE ACCIÓN ---
   const handleSaveTarget = async () => {
     const newVal = parseInt(tempTarget);
     if (!isNaN(newVal) && newVal > 0) {
@@ -114,13 +106,28 @@ export const ManagerDashboard: React.FC = () => {
     downloadCSV(filteredLogs, filename);
   };
 
+  // --- PDF BÁSICO (Actualizado con Orden) ---
   const handleDownloadStandardPDF = () => {
-    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
-    const filename = `Reporte_${startDate}_al_${endDate}`;
-    downloadPDF(filteredLogs, title, filename);
+    const doc = new jsPDF();
+    doc.text(`Reporte: ${startDate} al ${endDate}`, 14, 20);
+    
+    autoTable(doc, {
+      startY: 30,
+      // AGREGAMOS LA COLUMNA 'ORDEN'
+      head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Cant', 'Pts']],
+      body: filteredLogs.map(l => [
+        new Date(l.timestamp).toLocaleDateString(),
+        l.orderNumber || '-', // Muestra guion si no hay orden
+        l.operatorName,
+        l.sector,
+        l.model,
+        l.quantity,
+        l.totalPoints.toFixed(1)
+      ]),
+    });
+    doc.save('Reporte_Basico.pdf');
   };
 
-  // --- LÓGICA DE INGENIERÍA ---
   const handleEngineeringAccess = () => {
     if (isAuthorized) openEngineeringModal();
     else setShowAuthModal(true);
@@ -140,43 +147,27 @@ export const ManagerDashboard: React.FC = () => {
 
   const openEngineeringModal = async () => {
     setShowEngineeringModal(true);
-    // Si no hay análisis previo, ejecutamos uno nuevo
-    if (!analysisResult) {
-      runAnalysis();
-    }
+    if (!analysisResult) runAnalysis();
   };
 
-  // ESTA ES LA FUNCIÓN QUE DABA ERROR DE ARGUMENTOS
   const runAnalysis = async () => {
     setIsAnalyzing(true);
     try {
-      // Ahora pasamos los 4 argumentos requeridos: 
-      // 1. Datos Filtrados (para ver lo actual)
-      // 2. Datos Totales (para comparar con el resto)
-      // 3. Lista de Nombres
-      // 4. Operario Seleccionado
-      const result = await analyzeProductionData(
-        filteredLogs, 
-        allLogs, 
-        operatorList, 
-        selectedOperator
-      );
+      const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator);
       setAnalysisResult(result);
     } catch (e) {
-      console.error(e);
       setAnalysisResult("Error al generar análisis.");
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // --- PDF AVANZADO CON GRÁFICOS ---
+  // --- PDF COMPLETO (Actualizado con Orden) ---
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
     const title = `Reporte de Ingeniería TopSafe`;
     
-    // Encabezado
     doc.setFontSize(18);
     doc.text(title, 14, 20);
     doc.setFontSize(10);
@@ -185,12 +176,10 @@ export const ManagerDashboard: React.FC = () => {
 
     let startY = 40;
 
-    // 1. Análisis IA
     if (analysisResult) {
       doc.setFontSize(12);
       doc.setTextColor(234, 88, 12);
       doc.text("Análisis Inteligente", 14, startY);
-      
       doc.setFontSize(10);
       doc.setTextColor(0);
       const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/>/g, '');
@@ -199,10 +188,8 @@ export const ManagerDashboard: React.FC = () => {
       startY += 10 + (splitText.length * 5); 
     }
 
-    // 2. Captura de Gráficos
     try {
       await new Promise(r => setTimeout(r, 500)); 
-
       const chartTrend = document.getElementById('chart-trend');
       const chartSector = document.getElementById('chart-sector');
       
@@ -225,19 +212,19 @@ export const ManagerDashboard: React.FC = () => {
       console.error("Error gráficos:", e);
     }
 
-    // 3. Tabla de Datos
     doc.addPage();
     doc.text("Detalle de Registros", 14, 20);
 
     autoTable(doc, {
       startY: 25,
-      head: [['Fecha', 'Operario', 'Sector', 'Modelo', 'Op', 'Pts']],
+      // AGREGAMOS LA COLUMNA 'ORDEN' AQUÍ TAMBIÉN
+      head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts']],
       body: filteredLogs.map(l => [
         new Date(l.timestamp).toLocaleDateString(),
+        l.orderNumber || '-', 
         l.operatorName,
         l.sector,
         l.model,
-        l.operation,
         l.totalPoints.toFixed(1)
       ]),
       theme: 'grid'
@@ -247,7 +234,6 @@ export const ManagerDashboard: React.FC = () => {
     setIsGeneratingPDF(false);
   };
 
-  // --- DATOS PARA GRÁFICOS ---
   const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.operatorName]) {
       acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
@@ -288,7 +274,7 @@ export const ManagerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8 p-4 md:p-8">
-      {/* HEADER GERENCIAL */}
+      {/* HEADER */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
@@ -342,7 +328,7 @@ export const ManagerDashboard: React.FC = () => {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Registros</p><p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p></div>
       </div>
 
-      {/* GRÁFICOS (con IDs añadidos para PDF) */}
+      {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {selectedOperator === 'all' && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
@@ -358,7 +344,6 @@ export const ManagerDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* ID AÑADIDO: chart-trend */}
         <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 ${selectedOperator === 'all' ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
           <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
           <ResponsiveContainer width="100%" height="100%">
@@ -376,7 +361,6 @@ export const ManagerDashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6">
-        {/* ID AÑADIDO: chart-sector */}
         <div id="chart-sector" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
           <h3 className="text-md font-bold text-slate-700 mb-4">Producción por Sector</h3>
           <ResponsiveContainer width="100%" height="100%">
@@ -385,7 +369,7 @@ export const ManagerDashboard: React.FC = () => {
                 {countBySector.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
               </Pie>
               <Tooltip />
-              <Legend verticalAlign="middle" align="right" layout="vertical" />
+              <Legend />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -404,18 +388,29 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* HISTORIAL */}
+      {/* HISTORIAL DETALLADO (En Pantalla) */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
          <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
          <div className="overflow-x-auto max-h-96">
             <table className="w-full text-sm text-left text-slate-600">
                <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
-                  <tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Sector</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Cant</th><th className="px-6 py-3 text-right">Pts</th></tr>
+                  <tr>
+                    {/* COLUMNA ORDEN AGREGADA */}
+                    <th className="px-6 py-3">Fecha</th>
+                    <th className="px-6 py-3">Orden</th>
+                    <th className="px-6 py-3">Operario</th>
+                    <th className="px-6 py-3">Sector</th>
+                    <th className="px-6 py-3">Modelo</th>
+                    <th className="px-6 py-3 text-right">Cant</th>
+                    <th className="px-6 py-3 text-right">Pts</th>
+                  </tr>
                </thead>
                <tbody>
                   {filteredLogs.slice(0, 100).map(log => (
                      <tr key={log.id} className="border-b hover:bg-slate-50">
                         <td className="px-6 py-4">{new Date(log.timestamp).toLocaleDateString()}</td>
+                        {/* CELDA ORDEN AGREGADA */}
+                        <td className="px-6 py-4 font-mono text-xs">{log.orderNumber || '-'}</td>
                         <td className="px-6 py-4 font-bold">{log.operatorName}</td>
                         <td className="px-6 py-4"><span className="bg-slate-100 px-2 py-1 rounded text-xs">{log.sector}</span></td>
                         <td className="px-6 py-4">{log.model} - {log.operation}</td>
