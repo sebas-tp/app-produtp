@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Sector, ProductionLog, PointRule } from '../types';
 import { 
-  calculatePointsSync, getPointRuleSync, saveLog, getLogs, 
+  getPointRuleSync, saveLog, getLogs, 
   getOperators, getModels, getOperations, getPointsMatrix, downloadCSV,
   updateProductionLog, getProductivityTarget, getActiveNews, NewsItem 
 } from '../services/dataService';
-import { Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, Pencil, X, RefreshCw, Trophy, Target, Calendar, Bell, Megaphone } from 'lucide-react';
+import { 
+  Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
+  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash 
+} from 'lucide-react';
 
 export const OperatorForm: React.FC = () => {
   const [operatorList, setOperatorList] = useState<string[]>([]);
@@ -13,8 +16,6 @@ export const OperatorForm: React.FC = () => {
   const [operationList, setOperationList] = useState<string[]>([]);
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
-  
-  // Noticias
   const [news, setNews] = useState<NewsItem[]>([]);
 
   const [currentViewLogs, setCurrentViewLogs] = useState<ProductionLog[]>([]); 
@@ -26,7 +27,14 @@ export const OperatorForm: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   const [formData, setFormData] = useState({
-    operatorName: '', sector: Sector.CORTE, model: '', operation: '', quantity: '', startTime: '08:00', endTime: '17:00'
+    operatorName: '', 
+    sector: Sector.CORTE, 
+    model: '', 
+    operation: '', 
+    quantity: '', 
+    startTime: '08:00', 
+    endTime: '17:00',
+    orderNumber: '' // <--- NUEVO CAMPO
   });
 
   const [predictedPoints, setPredictedPoints] = useState<number>(0);
@@ -51,13 +59,12 @@ export const OperatorForm: React.FC = () => {
     initData();
   }, []);
 
-  // Recargar logs si cambia la fecha o el operario
+  // Recargar si cambia la fecha o el operario
   useEffect(() => { if (!isLoading) loadLogsByDate(); }, [formData.operatorName, selectedDate]);
 
   const loadLogsByDate = async () => {
     const allLogs = await getLogs();
     const filtered = allLogs.filter(log => {
-      // Filtramos por la fecha seleccionada (no necesariamente hoy)
       const logDate = log.timestamp.split('T')[0];
       const matchesOperator = formData.operatorName ? log.operatorName === formData.operatorName : true;
       return logDate === selectedDate && matchesOperator;
@@ -73,16 +80,28 @@ export const OperatorForm: React.FC = () => {
   }, [formData.sector, formData.model, formData.operation, formData.quantity, matrix]);
 
   const handleEditClick = (log: ProductionLog) => {
-    setEditingId(log.id);
-    // Al editar, también cambiamos la fecha seleccionada a la fecha del registro para no perderlo de vista
+    setEditingId(log.id!);
+    // Al editar, viajamos a la fecha del registro
     const logDate = log.timestamp.split('T')[0];
     setSelectedDate(logDate);
     
-    setFormData({ operatorName: log.operatorName, sector: log.sector, model: log.model, operation: log.operation, quantity: log.quantity.toString(), startTime: log.startTime, endTime: log.endTime });
+    setFormData({ 
+      operatorName: log.operatorName, 
+      sector: log.sector as Sector, 
+      model: log.model, 
+      operation: log.operation, 
+      quantity: log.quantity.toString(), 
+      startTime: log.startTime || '08:00', 
+      endTime: log.endTime || '17:00',
+      orderNumber: log.orderNumber || '' // Cargamos la orden existente
+    });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleCancelEdit = () => { setEditingId(null); setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' })); };
+  const handleCancelEdit = () => { 
+    setEditingId(null); 
+    setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' })); 
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,15 +110,13 @@ export const OperatorForm: React.FC = () => {
 
     setIsSaving(true);
     try {
-      // 1. CONSTRUIR TIMESTAMP CON LA FECHA SELECCIONADA
-      const now = new Date(); // Hora actual para mantener orden de carga
+      // Truco: Usamos la fecha seleccionada + la hora actual para mantener el orden cronológico de carga
+      const now = new Date();
       const [year, month, day] = selectedDate.split('-').map(Number);
-      
-      // Creamos la fecha usando la seleccionada + la hora actual
       const entryDate = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
       
       const logData = { 
-        timestamp: entryDate.toISOString(), // <--- ESTO ES LO QUE CAMBIÓ (Usa fecha elegida)
+        timestamp: entryDate.toISOString(), 
         ...formData, 
         quantity: parseInt(formData.quantity), 
         totalPoints: predictedPoints 
@@ -109,12 +126,10 @@ export const OperatorForm: React.FC = () => {
       else await saveLog({ id: crypto.randomUUID(), ...logData });
 
       setStatus('success');
-      
-      // 2. YA NO RESETEAMOS LA FECHA A HOY. Mantenemos selectedDate.
-      await loadLogsByDate(); // Solo recargamos la tabla
+      await loadLogsByDate(); // Recargamos la tabla con la fecha que elegiste
       
       setEditingId(null); 
-      // Limpiamos solo cantidad, modelo y operación para carga rápida del mismo día
+      // Limpiamos datos variables, pero mantenemos Operario y Orden (para carga rápida de lotes)
       setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '' }));
       
       setTimeout(() => setStatus('idle'), 3000);
@@ -133,7 +148,6 @@ export const OperatorForm: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       
-      {/* SECCIÓN DE NOTICIAS / ALERTAS */}
       {news.length > 0 && (
         <div className="space-y-3">
            {news.map(item => (
@@ -148,7 +162,6 @@ export const OperatorForm: React.FC = () => {
         </div>
       )}
 
-      {/* FORMULARIO DE CARGA */}
       <div className={`bg-white rounded-xl shadow-lg overflow-hidden border-t-4 ${borderColor} transition-colors duration-300`}>
         <div className={`${headerBg} p-6 text-white flex justify-between items-center transition-colors duration-300`}>
           <div>
@@ -159,28 +172,45 @@ export const OperatorForm: React.FC = () => {
             <p className="text-slate-200 text-sm">{editingId ? 'Modifique los valores y guarde los cambios' : 'Complete los datos de la tarea realizada'}</p>
           </div>
           
-          {/* NUEVO: SELECTOR DE FECHA EN EL HEADER */}
+          {/* SELECTOR DE FECHA (ESTILO CALENDARIO) */}
           <div className="flex flex-col items-end">
              <label className="text-[10px] uppercase font-bold text-slate-300 mb-1">Fecha de Trabajo</label>
-             <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm p-1 rounded-lg border border-white/20">
+             <div className="flex items-center gap-2 bg-white/10 backdrop-blur-sm p-1 rounded-lg border border-white/20 hover:bg-white/20 transition-colors cursor-pointer">
                <Calendar className="w-4 h-4 text-white" />
                <input 
                  type="date" 
                  value={selectedDate} 
                  onChange={(e) => setSelectedDate(e.target.value)} 
-                 className="bg-transparent text-white font-bold text-sm outline-none color-white-calendar"
+                 className="bg-transparent text-white font-bold text-sm outline-none color-white-calendar cursor-pointer"
                />
              </div>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">Operario Responsable</label>
-            <select name="operatorName" value={formData.operatorName} onChange={handleChange} disabled={!!editingId} className={`w-full rounded-lg border-slate-300 border p-3 focus:ring-2 focus:ring-${themeColor}-500 outline-none text-slate-900 font-medium bg-slate-50 disabled:opacity-60`} required>
-              <option value="">Seleccione su nombre...</option>
-              {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">Operario Responsable</label>
+              <select name="operatorName" value={formData.operatorName} onChange={handleChange} disabled={!!editingId} className={`w-full rounded-lg border-slate-300 border p-3 focus:ring-2 focus:ring-${themeColor}-500 outline-none text-slate-900 font-medium bg-slate-50 disabled:opacity-60`} required>
+                <option value="">Seleccione su nombre...</option>
+                {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
+              </select>
+            </div>
+            
+            {/* CAMPO N° ORDEN */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1 uppercase flex items-center gap-1">
+                <Hash className="w-4 h-4 text-slate-400"/> N° Orden / Lote
+              </label>
+              <input 
+                type="text" 
+                name="orderNumber" 
+                value={formData.orderNumber} 
+                onChange={handleChange} 
+                placeholder="Ej: 10245" 
+                className="w-full rounded-lg border-slate-300 border p-3 focus:ring-2 focus:ring-amber-500 outline-none text-slate-900 font-medium placeholder-slate-300"
+              />
+            </div>
           </div>
           
           <div className="grid grid-cols-2 gap-4">
@@ -254,18 +284,31 @@ export const OperatorForm: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-slate-500 uppercase bg-slate-100">
-                <tr><th className="px-4 py-2">Modelo</th><th className="px-4 py-2">Operación</th><th className="px-4 py-2 text-center">Inicio</th><th className="px-4 py-2 text-center">Fin</th><th className="px-4 py-2 text-right">Cant.</th><th className="px-4 py-2 text-right">Puntos</th><th className="px-4 py-2 text-center">Acción</th></tr>
+                <tr>
+                  <th className="px-4 py-2">Orden</th>
+                  <th className="px-4 py-2">Modelo</th>
+                  <th className="px-4 py-2">Operación</th>
+                  <th className="px-4 py-2 text-center">Horario</th>
+                  <th className="px-4 py-2 text-right">Cant.</th>
+                  <th className="px-4 py-2 text-right">Puntos</th>
+                  <th className="px-4 py-2 text-center">Acción</th>
+                </tr>
               </thead>
               <tbody>
                 {currentViewLogs.map(log => (
                   <tr key={log.id} className={`border-b border-slate-50 hover:bg-slate-50 ${editingId === log.id ? 'bg-blue-50' : ''}`}>
-                    <td className="px-4 py-2 font-medium text-slate-700">{log.model}</td><td className="px-4 py-2 text-slate-600">{log.operation}</td><td className="px-4 py-2 text-center text-slate-500 text-xs">{log.startTime}</td><td className="px-4 py-2 text-center text-slate-500 text-xs">{log.endTime}</td><td className="px-4 py-2 text-right font-bold">{log.quantity}</td><td className="px-4 py-2 text-right text-amber-600 font-bold">{log.totalPoints.toFixed(1)}</td>
+                    <td className="px-4 py-2 text-slate-500 font-mono text-xs font-bold">{log.orderNumber || '-'}</td>
+                    <td className="px-4 py-2 font-medium text-slate-700">{log.model}</td>
+                    <td className="px-4 py-2 text-slate-600">{log.operation}</td>
+                    <td className="px-4 py-2 text-center text-slate-500 text-xs">{log.startTime} - {log.endTime}</td>
+                    <td className="px-4 py-2 text-right font-bold">{log.quantity}</td>
+                    <td className="px-4 py-2 text-right text-amber-600 font-bold">{log.totalPoints.toFixed(1)}</td>
                     <td className="px-4 py-2 text-center"><button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-blue-600 transition-colors p-1" title="Editar registro"><Pencil className="w-4 h-4" /></button></td>
                   </tr>
                 ))}
                 {currentViewLogs.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No hay registros para la fecha seleccionada.</td></tr>}
               </tbody>
-              {currentViewLogs.length > 0 && <tfoot className="bg-slate-50 font-bold text-slate-800"><tr><td colSpan={4} className="px-4 py-2 text-right">TOTAL DEL DÍA:</td><td className="px-4 py-2 text-right">{currentViewLogs.reduce((a,b) => a + b.quantity, 0)}</td><td className="px-4 py-2 text-right text-amber-600">{totalPointsView.toFixed(1)}</td><td></td></tr></tfoot>}
+              {currentViewLogs.length > 0 && <tfoot className="bg-slate-50 font-bold text-slate-800"><tr><td colSpan={5} className="px-4 py-2 text-right">TOTAL DEL DÍA:</td><td className="px-4 py-2 text-right">{currentViewLogs.reduce((a,b) => a + b.quantity, 0)}</td><td className="px-4 py-2 text-right text-amber-600">{totalPointsView.toFixed(1)}</td><td></td></tr></tfoot>}
             </table>
           </div>
         </div>
