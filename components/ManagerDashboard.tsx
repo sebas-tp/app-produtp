@@ -69,7 +69,7 @@ export const ManagerDashboard: React.FC = () => {
   // FILTROS Y LIMPIEZA DE ANÁLISIS
   useEffect(() => { 
     applyFilters(); 
-    // ¡TRUCO! Si cambian los filtros, borramos el análisis viejo para no confundir
+    // Limpiamos el análisis al cambiar filtros para obligar a regenerar
     setAnalysisResult(''); 
   }, [allLogs, startDate, endDate, selectedOperator]);
 
@@ -140,19 +140,30 @@ export const ManagerDashboard: React.FC = () => {
 
   const openEngineeringModal = async () => {
     setShowEngineeringModal(true);
-    // Si no hay análisis, o si cambiaron los datos, forzamos uno nuevo
+    // Si no hay análisis previo, ejecutamos uno nuevo
     if (!analysisResult) {
       runAnalysis();
     }
   };
 
+  // ESTA ES LA FUNCIÓN QUE DABA ERROR DE ARGUMENTOS
   const runAnalysis = async () => {
     setIsAnalyzing(true);
     try {
-      const totalPts = filteredLogs.reduce((sum, l) => sum + l.totalPoints, 0);
-      const result = await analyzeProductionData(filteredLogs, operatorList, totalPts);
+      // Ahora pasamos los 4 argumentos requeridos: 
+      // 1. Datos Filtrados (para ver lo actual)
+      // 2. Datos Totales (para comparar con el resto)
+      // 3. Lista de Nombres
+      // 4. Operario Seleccionado
+      const result = await analyzeProductionData(
+        filteredLogs, 
+        allLogs, 
+        operatorList, 
+        selectedOperator
+      );
       setAnalysisResult(result);
     } catch (e) {
+      console.error(e);
       setAnalysisResult("Error al generar análisis.");
     } finally {
       setIsAnalyzing(false);
@@ -164,35 +175,6 @@ export const ManagerDashboard: React.FC = () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
     const title = `Reporte de Ingeniería TopSafe`;
-
-// --- DENTRO DE ManagerDashboard.tsx ---
-
-  const runAnalysis = async () => {
-    setIsAnalyzing(true);
-    try {
-      // AQUÍ ESTÁ EL CAMBIO CLAVE:
-      // Pasamos 'filteredLogs' (lo que se ve), 'allLogs' (el contexto global), 
-      // la lista de nombres y quién está seleccionado.
-      const result = await analyzeProductionData(
-        filteredLogs, 
-        allLogs, 
-        operatorList, 
-        selectedOperator
-      );
-      
-      setAnalysisResult(result);
-    } catch (e) {
-      setAnalysisResult("Error al generar análisis.");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-
-
-
-
-
     
     // Encabezado
     doc.setFontSize(18);
@@ -214,12 +196,11 @@ export const ManagerDashboard: React.FC = () => {
       const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/>/g, '');
       const splitText = doc.splitTextToSize(cleanText, 180);
       doc.text(splitText, 14, startY + 8);
-      startY += 10 + (splitText.length * 5); // Actualizamos Y
+      startY += 10 + (splitText.length * 5); 
     }
 
     // 2. Captura de Gráficos
     try {
-      // Truco: Esperamos un poquito para asegurar renderizado
       await new Promise(r => setTimeout(r, 500)); 
 
       const chartTrend = document.getElementById('chart-trend');
@@ -229,7 +210,6 @@ export const ManagerDashboard: React.FC = () => {
         doc.addPage(); 
         doc.setFontSize(14);
         doc.text("Evolución de Producción", 14, 20);
-        // backgroundColor: white es clave para que no salga negro
         const canvas1 = await html2canvas(chartTrend, { scale: 2, backgroundColor: '#ffffff' });
         const img1 = canvas1.toDataURL('image/png');
         doc.addImage(img1, 'PNG', 14, 30, 180, 80); 
@@ -398,7 +378,7 @@ export const ManagerDashboard: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6">
         {/* ID AÑADIDO: chart-sector */}
         <div id="chart-sector" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
-          <h3 className="text-md font-semibold text-slate-700 mb-4">Producción por Sector</h3>
+          <h3 className="text-md font-bold text-slate-700 mb-4">Producción por Sector</h3>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={countBySector} cx="50%" cy="50%" innerRadius={60} outerRadius={80} fill="#8884d8" paddingAngle={5} dataKey="value">
@@ -467,11 +447,10 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 2: INGENIERÍA / IA */}
+      {/* MODAL 2: MODO INGENIERÍA */}
       {showEngineeringModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in zoom-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
-            
             <div className="bg-gradient-to-r from-indigo-900 to-slate-900 p-6 flex justify-between items-center text-white shrink-0">
               <div className="flex items-center gap-4">
                 <div className="bg-indigo-500/20 p-2 rounded-lg"><BrainCircuit className="w-8 h-8 text-indigo-400"/></div>
@@ -485,7 +464,6 @@ export const ManagerDashboard: React.FC = () => {
 
             <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
-                
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
                     <h4 className="text-lg font-bold text-indigo-900 mb-4 border-b pb-2">Análisis de Inteligencia Artificial</h4>
@@ -529,7 +507,6 @@ export const ManagerDashboard: React.FC = () => {
                     </ul>
                   </div>
                 </div>
-
               </div>
             </div>
 
@@ -539,7 +516,6 @@ export const ManagerDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
     </div>
   );
 };
