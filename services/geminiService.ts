@@ -1,73 +1,108 @@
 import { ProductionLog } from '../types';
 
 export const analyzeProductionData = async (
-  productionData: ProductionLog[], 
-  allOperators: string[], 
-  totalPoints: number
+  currentData: ProductionLog[],      // Datos filtrados (lo que se ve en tabla)
+  allData: ProductionLog[],          // Datos globales (para comparar/contexto)
+  operatorList: string[],            // Lista de nombres
+  selectedOperator: string           // Nombre del filtro ('all' o un nombre)
 ): Promise<string> => {
-  // Simulamos un pequeño tiempo de "pensamiento" para dar feedback visual
+  
+  // Simulamos "pensando..."
   await new Promise(resolve => setTimeout(resolve, 1500));
-  return generateAdvancedLocalAnalysis(productionData, allOperators, totalPoints);
+
+  return generateSmartReport(currentData, allData, selectedOperator);
 };
 
-function generateAdvancedLocalAnalysis(data: ProductionLog[], allOperators: string[], totalPoints: number): string {
-  // 1. CÁLCULOS AVANZADOS
-  const activeOps = new Set(data.map(d => getOpName(d))).size;
-  const targetPerOperator = 800; // Meta estándar
-  const globalTarget = activeOps * targetPerOperator;
-  const efficiency = activeOps > 0 ? ((totalPoints / globalTarget) * 100) : 0;
+function generateSmartReport(currentData: ProductionLog[], allData: ProductionLog[], selectedOp: string): string {
+  // 1. CÁLCULOS GLOBALES (Contexto de Planta)
+  const globalPoints = allData.reduce((sum, d) => sum + (d.points || 0), 0);
   
-  // Análisis por Operario
-  const opPoints: Record<string, number> = {};
-  data.forEach(d => { 
-    const name = getOpName(d);
-    const pts = getPoints(d);
-    opPoints[name] = (opPoints[name] || 0) + pts; 
+  // Agrupamos puntos por operario (Global)
+  const globalOpStats: Record<string, number> = {};
+  allData.forEach(d => {
+    const name = d.operator || d.operatorName || 'N/A';
+    const pts = Number(d.points || d.totalPoints || 0);
+    globalOpStats[name] = (globalOpStats[name] || 0) + pts;
   });
+
+  const activeOpsCount = Object.keys(globalOpStats).length;
+  const plantAverage = activeOpsCount > 0 ? globalPoints / activeOpsCount : 0;
+
+  // Ranking Global
+  const ranking = Object.entries(globalOpStats)
+    .sort((a, b) => b[1] - a[1]) // De mayor a menor
+    .map((entry, index) => ({ name: entry[0], points: entry[1], rank: index + 1 }));
+
+  const topPerformer = ranking[0];
   
-  const sortedOps = Object.entries(opPoints).sort((a, b) => b[1] - a[1]);
-  const bestOp = sortedOps[0];
-  const lowPerformanceOps = sortedOps.filter(([_, pts]) => pts < (targetPerOperator * 0.5)); // Menos del 50% de la meta
+  // 2. GENERACIÓN DEL REPORTE SEGÚN EL CASO
+  let report = "";
 
-  // Análisis por Sector
-  const sectorPoints: Record<string, number> = {};
-  data.forEach(d => { sectorPoints[d.sector] = (sectorPoints[d.sector] || 0) + getPoints(d); });
-  const bestSector = Object.entries(sectorPoints).sort((a, b) => b[1] - a[1])[0];
+  // --- CASO A: REPORTE INDIVIDUAL (Comparativo) ---
+  if (selectedOp !== 'all') {
+    const opData = ranking.find(r => r.name === selectedOp);
+    const opPoints = opData ? opData.points : 0;
+    const opRank = opData ? opData.rank : '-';
+    
+    // Comparación con promedio
+    const diffPercent = plantAverage > 0 ? ((opPoints - plantAverage) / plantAverage) * 100 : 0;
+    const statusIcon = diffPercent >= 0 ? "🟢" : (diffPercent > -15 ? "🟡" : "🔴");
+    const statusText = diffPercent >= 0 ? "Supera el promedio" : "Debajo del promedio";
 
-  // Análisis de Modelos
-  const modelCount: Record<string, number> = {};
-  data.forEach(d => { modelCount[d.model] = (modelCount[d.model] || 0) + d.quantity; });
-  const topModel = Object.entries(modelCount).sort((a, b) => b[1] - a[1])[0];
+    report += `### 👤 Análisis de Desempeño: ${selectedOp}\n\n`;
+    
+    report += `**METRICAS CLAVE:**\n`;
+    report += `* **Puntos Totales:** ${opPoints.toLocaleString()} pts\n`;
+    report += `* **Ranking en Planta:** Puesto #${opRank} de ${activeOpsCount} operarios.\n`;
+    report += `* **Comparativa:** ${statusIcon} **${Math.abs(diffPercent).toFixed(1)}%** ${diffPercent >= 0 ? 'arriba' : 'abajo'} del promedio de planta (${plantAverage.toFixed(0)} pts).\n\n`;
 
-  // 2. GENERACIÓN DEL REPORTE PROFESIONAL
-  let report = `### 🏭 Informe Técnico de Producción\n\n`;
+    report += `**📊 DIAGNÓSTICO:**\n`;
+    if (diffPercent >= 10) {
+      report += `El operario muestra un **rendimiento excepcional**. Su productividad tracciona el promedio general hacia arriba. Es un candidato ideal para mentorías o tareas complejas.\n`;
+    } else if (diffPercent <= -20) {
+      report += `⚠️ **Atención:** El rendimiento está significativamente lejos del estándar del equipo. \n`;
+      report += `**Posibles Causas:** Falta de material, problemas mecánicos en su puesto o necesidad de re-capacitación en el modelo actual.\n`;
+    } else {
+      report += `El desempeño es **estable y consistente** con el resto del equipo. Cumple con el estándar operativo normal.\n`;
+    }
+
+    report += `\n> *Referencia: El líder actual es ${topPerformer?.name} con ${topPerformer?.points.toFixed(0)} pts.*`;
   
-  // Sección Resumen
-  report += `**RESUMEN EJECUTIVO**\n`;
-  report += `El rendimiento actual de la planta es del **${efficiency.toFixed(1)}%** respecto a la capacidad instalada activa. `;
-  report += `Se han procesado **${data.length} lotes** generando un total de **${totalPoints.toLocaleString()} puntos**.\n\n`;
+  } 
+  
+  // --- CASO B: REPORTE GLOBAL (Gerencial) ---
+  else {
+    const efficiency = (globalPoints / (activeOpsCount * 800)) * 100; // Meta base 800 como ejemplo
+    
+    report += `### 🏭 Reporte Global de Planta\n\n`;
+    
+    report += `**ESTADO GENERAL:**\n`;
+    report += `La planta opera con **${activeOpsCount} operarios** activos, generando un total de **${globalPoints.toLocaleString()} puntos**.\n`;
+    report += `El promedio de producción por persona es de **${plantAverage.toFixed(0)} puntos**.\n\n`;
 
-  // Sección Detalles
-  report += `**🔍 DETALLE OPERATIVO**\n`;
-  report += `* **Cuellos de Botella:** ${lowPerformanceOps.length > 0 ? `Se detectaron ${lowPerformanceOps.length} operarios por debajo del umbral crítico de eficiencia (50%).` : 'No se detectan cuellos de botella individuales críticos.'}\n`;
-  report += `* **Carga por Sector:** El sector con mayor volumen de trabajo hoy es **${bestSector ? bestSector[0] : 'N/A'}** (${bestSector ? bestSector[1].toFixed(0) : 0} pts), lo que indica dónde se concentra el flujo productivo.\n`;
-  report += `* **Producto Estrella:** El modelo **${topModel ? topModel[0] : 'N/A'}** representa la mayor parte del volumen físico (${topModel ? topModel[1] : 0} unidades).\n\n`;
+    report += `**🏆 PODIO DEL DÍA:**\n`;
+    ranking.slice(0, 3).forEach((r, i) => {
+      const medal = i===0 ? "🥇" : i===1 ? "🥈" : "🥉";
+      report += `* ${medal} **${r.name}:** ${r.points.toFixed(0)} pts\n`;
+    });
 
-  // Sección Recomendaciones (Lógica condicional)
-  report += `**💡 PLAN DE ACCIÓN RECOMENDADO**\n`;
-  if (efficiency < 60) {
-    report += `1.  🔴 **Alerta de Eficiencia:** La planta opera al ${efficiency.toFixed(0)}%. Se recomienda auditar inmediatamente disponibilidad de materia prima en el sector de Corte.\n`;
-    report += `2.  Revisar si los ${lowPerformanceOps.length} operarios de bajo rendimiento tienen incidencias técnicas con sus máquinas.\n`;
-  } else if (efficiency < 85) {
-    report += `1.  🟡 **Optimización:** El ritmo es estable pero mejorable. Evaluar balanceo de línea para apoyar al sector de ${bestSector ? bestSector[0] : 'producción'}.\n`;
-    report += `2.  Incentivar al personal para alcanzar el objetivo diario antes del cierre de turno.\n`;
-  } else {
-    report += `1.  🟢 **Alto Rendimiento:** La planta opera a ritmo óptimo. Se sugiere preparar logística de expedición para evitar acumulación de stock terminado.\n`;
+    report += `\n**📉 OPORTUNIDADES DE MEJORA:**\n`;
+    // Buscamos los 3 últimos (que tengan puntos > 0 para no contar ausentes)
+    const bottom performers = ranking.filter(r => r.points > 0).slice(-3).reverse();
+    if (bottom performers.length > 0) {
+      report += `Se detecta rendimiento bajo en: **${bottom performers.map(r => r.name).join(", ")}**. `;
+      report += `Estos operarios están alejados del líder por más de un ${(topPerformer ? ((topPerformer.points - bottom performers[0].points)/topPerformer.points * 100).toFixed(0) : 0)}%.\n`;
+    } else {
+      report += `La dispersión entre operarios es baja. ¡Excelente balanceo de línea!\n`;
+    }
+
+    report += `\n**💡 RECOMENDACIÓN GERENCIAL:**\n`;
+    if (efficiency < 70) {
+      report += `🔴 **Prioridad Alta:** La eficiencia global es baja. Revisar si hubo paradas de línea generales o falta de insumos críticos en el sector de Corte.`;
+    } else {
+      report += `🟢 **Sostener Ritmo:** La planta fluye correctamente. Enfocar supervisión en los operarios del cuartil inferior para elevar el promedio general.`;
+    }
   }
 
   return report;
 }
-
-// Helpers para evitar errores de tipo si los nombres varían
-function getOpName(d: any): string { return d.operatorName || d.operator || 'Desconocido'; }
-function getPoints(d: any): number { return Number(d.totalPoints || d.points || 0); }
