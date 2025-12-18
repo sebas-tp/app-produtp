@@ -61,7 +61,8 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
         points: Number(data.totalPoints || data.points || 0),
         startTime: data.startTime || '',
         endTime: data.endTime || '',
-        orderNumber: data.orderNumber || '' 
+        orderNumber: data.orderNumber || '',
+        comments: data.comments || '' // <--- LEEMOS LOS COMENTARIOS
       } as ProductionLog;
     });
   } catch (error) {
@@ -132,15 +133,12 @@ export const saveOperators = async (list: string[]) => { await setDoc(doc(db, CO
 export const saveModels = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'models'), { list }); };
 export const saveOperations = async (list: string[]) => { await setDoc(doc(db, CONFIG_COL, 'operations'), { list }); };
 
-// --- FUNCIÓN NUEVA: BORRAR OPERARIO Y SUS DATOS ---
 export const deleteOperatorWithData = async (operatorName: string) => {
   try {
-    // 1. Eliminar de la lista
     const currentOps = await getOperators();
     const newOps = currentOps.filter(op => op !== operatorName);
     await saveOperators(newOps);
 
-    // 2. Eliminar sus logs
     const q = query(collection(db, LOGS_COL), where('operatorName', '==', operatorName));
     const snapshot = await getDocs(q);
     
@@ -237,7 +235,8 @@ export const downloadCSV = (logs: ProductionLog[], filename: string) => {
   if (logs.length === 0) { alert("No hay datos."); return; }
   
   const delimiter = ";"; 
-  const headers = ["ID", "Fecha", "Orden", "Operario", "Sector", "Modelo", "Operacion", "Cantidad", "Total Puntos"];
+  // AGREGAMOS 'Comentarios' AL FINAL
+  const headers = ["ID", "Fecha", "Orden", "Operario", "Sector", "Modelo", "Operacion", "Cantidad", "Total Puntos", "Comentarios"];
   
   const rows = logs.map(log => [
     log.id,
@@ -248,7 +247,8 @@ export const downloadCSV = (logs: ProductionLog[], filename: string) => {
     log.model,
     log.operation,
     log.quantity,
-    log.totalPoints.toFixed(2).replace('.', ',')
+    log.totalPoints.toFixed(2).replace('.', ','),
+    `"${log.comments || ''}"` // Evitamos romper CSV si hay comas
   ]);
 
   const csvContent = "\uFEFF" + [headers.join(delimiter), ...rows.map(r => r.join(delimiter))].join("\n");
@@ -276,7 +276,8 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
   doc.setFontSize(10);
   doc.text(`Total Unidades: ${totalQty} | Total Puntos: ${totalPts.toFixed(1)}`, 14, 28);
 
-  const tableColumn = ["Fecha", "Orden", "Operario", "Modelo", "Operación", "Cant.", "Pts"];
+  // AGREGAMOS 'Obs.' AL FINAL
+  const tableColumn = ["Fecha", "Orden", "Operario", "Modelo", "Op", "Cant", "Pts", "Obs."];
   const tableRows = logs.map(log => [
     new Date(log.timestamp).toLocaleDateString(),
     log.orderNumber || '-',
@@ -284,7 +285,8 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
     log.model,
     log.operation,
     log.quantity,
-    log.totalPoints.toFixed(1)
+    log.totalPoints.toFixed(1),
+    log.comments ? log.comments.substring(0, 15) + '...' : '-' // Recortado para que entre
   ]);
 
   autoTable(doc, {
@@ -293,7 +295,7 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
     startY: 35,
     theme: 'grid',
     headStyles: { fillColor: [217, 119, 6] }, 
-    styles: { fontSize: 9 },
+    styles: { fontSize: 8 }, // Letra un poco más chica
   });
   doc.save(`${filename}.pdf`);
 };
