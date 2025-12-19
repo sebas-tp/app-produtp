@@ -5,16 +5,17 @@ import {
   getOperations, saveOperations, 
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
   addNews, deleteNews, getActiveNews, NewsItem,
-  deleteOperatorWithData, getLogs 
+  deleteOperatorWithData, getLogs,
+  restoreSystemFromBackup // <--- IMPORTANTE: Asegúrate de tener esto importado
 } from '../services/dataService';
 import { Sector, PointRule, ProductionLog } from '../types';
 import { 
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
-  FileSearch, AlertOctagon, ArrowRight, Download, Shield 
+  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson 
 } from 'lucide-react';
 
-// --- COMPONENTE GESTOR DE LISTAS (Igual que antes) ---
+// --- COMPONENTE GESTOR DE LISTAS ---
 interface ListManagerProps {
   title: string;
   data: string[];
@@ -113,7 +114,7 @@ export const AdminPanel: React.FC = () => {
 
   const [jsonImport, setJsonImport] = useState('');
   const [importing, setImporting] = useState(false);
-  const [backingUp, setBackingUp] = useState(false); // Nuevo estado para el backup
+  const [backingUp, setBackingUp] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -202,31 +203,18 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
   };
 
-  // --- NUEVA FUNCIÓN: BACKUP COMPLETO ---
+  // --- LÓGICA DE BACKUP (EXPORTAR) ---
   const handleFullBackup = async () => {
     setBackingUp(true);
     try {
-      // 1. Recopilar TODOS los datos
       const backupData = {
-        meta: {
-          date: new Date().toISOString(),
-          version: "2.0",
-          app: "TopSafe Production"
-        },
-        config: {
-          operators,
-          models,
-          operations
-        },
+        meta: { date: new Date().toISOString(), version: "2.0", app: "TopSafe Production" },
+        config: { operators, models, operations },
         matrix: matrix,
         logs: logs,
         news: activeNews
       };
-
-      // 2. Convertir a JSON
       const jsonString = JSON.stringify(backupData, null, 2);
-      
-      // 3. Crear Blob y descargar
       const blob = new Blob([jsonString], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -235,32 +223,21 @@ export const AdminPanel: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
-    } catch (e) {
-      console.error(e);
-      alert("Error al generar el respaldo.");
-    } finally {
-      setBackingUp(false);
-    }
+    } catch (e) { console.error(e); alert("Error al generar el respaldo."); } finally { setBackingUp(false); }
   };
 
+  // --- LÓGICA DE IMPORTACIÓN SIMPLE (LEGACY - PARA AGREGAR NUEVOS) ---
   const handleBulkImport = async () => {
     if (!jsonImport || !window.confirm("¿Importar datos?")) return;
     setImporting(true);
     try {
       const data = JSON.parse(jsonImport);
-      // Validamos si es una importación simple o un backup complejo
-      // Por ahora mantenemos la importación simple de matriz para no complicar
       if (!Array.isArray(data)) { alert("Por favor use el formato de lista [...] para importar matriz."); return; }
-      
       let added = 0;
       for (const item of data) {
         if (item.sector && item.model && item.operation) {
           const exists = matrix.some(r => r.sector === item.sector && r.model === item.model.toString() && r.operation === item.operation);
-          if (!exists) {
-            await addPointRule({ ...item, model: item.model.toString(), pointsPerUnit: Number(item.pointsPerUnit) });
-            added++;
-          }
+          if (!exists) { await addPointRule({ ...item, model: item.model.toString(), pointsPerUnit: Number(item.pointsPerUnit) }); added++; }
         }
       }
       await loadData(); alert(`Importados: ${added}`); setJsonImport('');
@@ -400,22 +377,111 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
+      {/* --- PESTAÑA: DATOS & BACKUP --- */}
       {activeTab === 'import' && (
-        <div className="grid grid-cols-1 gap-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-emerald-600"/> Respaldo de Seguridad</h3>
-            <p className="text-sm text-slate-600 mb-4">Descargue una copia completa de toda la base de datos (Registros, Configuración, Matriz y Noticias). Guarde este archivo en un lugar seguro (Drive/PC) semanalmente.</p>
-            <button onClick={handleFullBackup} disabled={backingUp} className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-lg transition-colors shadow-lg shadow-emerald-100 disabled:opacity-50">
-              {backingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-              {backingUp ? 'GENERANDO ARCHIVO...' : 'DESCARGAR BACKUP COMPLETO (.JSON)'}
-            </button>
+        <div className="space-y-8">
+          
+          {/* SECCIÓN 1: SEGURIDAD Y RESPALDO */}
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><Shield className="w-6 h-6 text-emerald-600"/> Zona de Seguridad: Respaldo Completo</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* 1. EXPORTAR */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-emerald-100 flex flex-col justify-between">
+                <div>
+                  <h4 className="font-bold text-slate-700 mb-2">1. Descargar Copia de Seguridad</h4>
+                  <p className="text-sm text-slate-500 mb-6">Genera un archivo único (.json) con TODOS los datos del sistema: Registros de producción, historial, configuraciones y noticias. Guarde este archivo en un lugar seguro (Drive/PC) semanalmente.</p>
+                </div>
+                <button onClick={handleFullBackup} disabled={backingUp} className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-emerald-100 disabled:opacity-50">
+                  {backingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                  {backingUp ? 'Generando Archivo...' : 'DESCARGAR BACKUP'}
+                </button>
+              </div>
+
+              {/* 2. RESTAURAR (EL NUEVO UI QUE FALTABA) */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-red-100 relative overflow-hidden">
+                <div className="absolute top-0 right-0 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-bl">PELIGRO</div>
+                <h4 className="font-bold text-slate-700 mb-2">2. Restaurar Sistema</h4>
+                <p className="text-sm text-slate-500 mb-4">Recupera el sistema subiendo un archivo de respaldo previo. <span className="text-red-500 font-bold">Atención: Esto modificará la base de datos actual.</span></p>
+                
+                <label className={`w-full flex flex-col items-center justify-center gap-2 border-2 border-dashed ${importing ? 'border-slate-300 bg-slate-50' : 'border-red-200 hover:bg-red-50 cursor-pointer'} rounded-lg p-4 transition-colors`}>
+                  {importing ? (
+                    <><Loader2 className="w-6 h-6 animate-spin text-slate-400" /><span className="text-sm font-bold text-slate-500">Restaurando...</span></>
+                  ) : (
+                    <>
+                      <Upload className="w-6 h-6 text-red-300" />
+                      <span className="text-sm font-bold text-red-600">Subir archivo .JSON</span>
+                      <input 
+                        type="file" accept=".json" className="hidden" 
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          
+                          if (!window.confirm(`¿ESTÁS SEGURO?\n\nVas a restaurar el sistema usando el archivo:\n"${file.name}"\n\nEsta acción modificará la base de datos actual.`)) {
+                            e.target.value = ''; 
+                            return;
+                          }
+
+                          setImporting(true);
+                          try {
+                            const text = await file.text();
+                            const data = JSON.parse(text);
+                            
+                            if (!data.meta || !data.meta.app || data.meta.app !== 'TopSafe Production') {
+                              throw new Error("El archivo no es un backup válido de TopSafe.");
+                            }
+
+                            const success = await restoreSystemFromBackup(data);
+
+                            if (success) {
+                              alert("¡Sistema restaurado con éxito! Se recargará la página.");
+                              window.location.reload();
+                            } else {
+                              throw new Error("Falló la escritura en base de datos.");
+                            }
+
+                          } catch (err: any) {
+                            console.error(err);
+                            alert(`Error al restaurar: ${err.message}`);
+                            setImporting(false);
+                          }
+                          e.target.value = ''; 
+                        }}
+                      />
+                    </>
+                  )}
+                </label>
+              </div>
+            </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100 opacity-75 hover:opacity-100 transition-opacity">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Database className="w-5 h-5 text-indigo-600"/> Importar Matriz (Avanzado)</h3>
-            <textarea className="w-full h-32 border p-4 rounded-lg font-mono text-xs bg-slate-50" value={jsonImport} onChange={(e) => setJsonImport(e.target.value)} placeholder='[ {"sector": "Corte", "model": "10404", "operation": "Corte", "pointsPerUnit": 72.12}, ... ]' />
-            <button onClick={handleBulkImport} disabled={importing || !jsonImport} className="mt-4 bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 w-full">{importing ? <Loader2 className="animate-spin w-5 h-5 mx-auto"/> : 'IMPORTAR MATRIZ'}</button>
+          <hr className="border-slate-200" />
+
+          {/* SECCIÓN 2: CARGA MASIVA (TU HERRAMIENTA ANTIGUA) */}
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><FileJson className="w-6 h-6 text-indigo-600"/> Gestión Diaria: Importar Catálogo</h3>
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
+              <p className="text-sm text-slate-500 mb-4">
+                Use esta herramienta para agregar nuevos modelos o reglas de precios de forma masiva copiando y pegando un texto JSON. 
+                <span className="font-bold text-indigo-600"> Esto NO borra datos, solo agrega los nuevos.</span>
+              </p>
+              <textarea
+                className="w-full h-40 border border-slate-300 p-4 rounded-lg font-mono text-xs bg-slate-50 outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder='[ {"sector": "Corte", "model": "10404", "operation": "Corte", "pointsPerUnit": 72.12}, ... ]'
+                value={jsonImport}
+                onChange={(e) => setJsonImport(e.target.value)}
+              />
+              <button 
+                onClick={handleBulkImport} 
+                disabled={importing || !jsonImport}
+                className="mt-4 bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 w-full flex justify-center items-center gap-2"
+              >
+                {importing ? <Loader2 className="animate-spin w-5 h-5"/> : <Database className="w-5 h-5"/>} 
+                {importing ? 'Procesando...' : 'AGREGAR AL CATÁLOGO'}
+              </button>
+            </div>
           </div>
+
         </div>
       )}
     </div>
