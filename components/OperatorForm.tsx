@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sector, ProductionLog, PointRule } from '../types';
 import { 
   getPointRuleSync, saveLog, getLogs, 
@@ -8,9 +8,108 @@ import {
 } from '../services/dataService';
 import { 
   Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
-  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp 
+  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp, Search, ChevronDown 
 } from 'lucide-react';
 
+// --- COMPONENTE DE SELECCIÓN CON BUSCADOR (NUEVO) ---
+interface SearchableSelectProps {
+  label: string;
+  options: string[];
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+const SearchableSelect: React.FC<SearchableSelectProps> = ({ label, options, value, onChange, placeholder, disabled }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Filtrar opciones basado en lo que escribe el usuario
+  const filteredOptions = options.filter(opt => 
+    opt.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Cerrar si hace clic fuera del componente
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleOpen = () => {
+    if (disabled) return;
+    setSearchTerm(''); // Limpiar búsqueda al abrir
+    setIsOpen(!isOpen);
+  };
+
+  const handleSelect = (option: string) => {
+    onChange(option);
+    setIsOpen(false);
+    setSearchTerm('');
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">{label}</label>
+      
+      {/* El "Input" que se ve siempre */}
+      <div 
+        onClick={handleOpen}
+        className={`w-full rounded-lg border border-slate-300 p-3 flex justify-between items-center bg-white cursor-pointer ${disabled ? 'opacity-60 bg-slate-100 cursor-not-allowed' : 'hover:border-blue-400 focus:ring-2 focus:ring-blue-500'} transition-all`}
+      >
+        <span className={`font-medium ${value ? 'text-slate-900' : 'text-slate-400'}`}>
+          {value || placeholder || 'Seleccionar...'}
+        </span>
+        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+
+      {/* La lista desplegable con buscador */}
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          {/* Campo de Búsqueda */}
+          <div className="p-2 border-b border-slate-100 bg-slate-50 sticky top-0">
+            <div className="flex items-center bg-white border border-slate-300 rounded-lg px-2">
+              <Search className="w-4 h-4 text-slate-400" />
+              <input 
+                type="text" 
+                autoFocus
+                placeholder="Escriba para buscar..." 
+                className="w-full p-2 outline-none text-sm text-slate-700 placeholder:text-slate-400"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
+          
+          {/* Lista de Opciones */}
+          <div className="max-h-60 overflow-y-auto custom-scrollbar">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt, idx) => (
+                <div 
+                  key={idx} 
+                  onClick={() => handleSelect(opt)}
+                  className={`p-3 text-sm cursor-pointer hover:bg-blue-50 transition-colors border-b border-slate-50 last:border-0 ${value === opt ? 'bg-blue-100 font-bold text-blue-800' : 'text-slate-700'}`}
+                >
+                  {opt}
+                </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-slate-400 text-sm italic">No se encontraron resultados.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- COMPONENTE PRINCIPAL (OperatorForm) ---
 export const OperatorForm: React.FC = () => {
   const [operatorList, setOperatorList] = useState<string[]>([]);
   const [modelList, setModelList] = useState<string[]>([]);
@@ -20,7 +119,7 @@ export const OperatorForm: React.FC = () => {
   const [news, setNews] = useState<NewsItem[]>([]);
 
   const [currentViewLogs, setCurrentViewLogs] = useState<ProductionLog[]>([]); 
-  const [operatorHistory, setOperatorHistory] = useState<any[]>([]); // <--- NUEVO: Historial agrupado
+  const [operatorHistory, setOperatorHistory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -44,10 +143,6 @@ export const OperatorForm: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const totalPointsView = currentViewLogs.reduce((acc, log) => acc + log.totalPoints, 0);
-  
-  // NOTA: Si dailyTarget es la meta de PLANTA (ej: 24960), para un solo operario 
-  // el porcentaje se verá bajo. Ajusta esta lógica si tienes una meta individual.
-  // Por ahora comparamos contra la meta global o lo que configures.
   const progressPercent = dailyTarget > 0 ? (totalPointsView / dailyTarget) * 100 : 0;
   const isGoalReached = progressPercent >= 100;
 
@@ -70,7 +165,6 @@ export const OperatorForm: React.FC = () => {
   const loadLogsByDate = async () => {
     const allLogs = await getLogs();
     
-    // 1. Logs para la tabla principal (Día seleccionado)
     const filtered = allLogs.filter(log => {
       const logDate = log.timestamp.split('T')[0];
       const matchesOperator = formData.operatorName ? log.operatorName === formData.operatorName : true;
@@ -78,11 +172,8 @@ export const OperatorForm: React.FC = () => {
     });
     setCurrentViewLogs(filtered);
 
-    // 2. NUEVO: Cálculo de Rendimiento Diario (Si hay operario seleccionado)
     if (formData.operatorName) {
       const groupedData: Record<string, number> = {};
-      
-      // Filtramos logs solo de este operario (de toda la historia)
       const opLogs = allLogs.filter(l => l.operatorName === formData.operatorName);
       
       opLogs.forEach(log => {
@@ -90,11 +181,10 @@ export const OperatorForm: React.FC = () => {
         groupedData[date] = (groupedData[date] || 0) + log.totalPoints;
       });
 
-      // Convertimos a array y ordenamos por fecha descendente
       const historyArray = Object.entries(groupedData)
         .map(([date, points]) => ({ date, points }))
-        .sort((a, b) => b.date.localeCompare(a.date)) // Ordenar fechas descendente
-        .slice(0, 5); // Solo los últimos 5 días trabajados
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 5);
 
       setOperatorHistory(historyArray);
     }
@@ -127,14 +217,15 @@ export const OperatorForm: React.FC = () => {
   };
 
   const handleDeleteClick = async (id: string) => {
+    if (!id) { alert("Error: Registro sin ID"); return; }
     if (window.confirm("¿Estás seguro de que quieres BORRAR este registro?")) {
       try {
         await deleteProductionLog(id);
         if (editingId === id) handleCancelEdit();
         await loadLogsByDate();
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error al borrar:", error);
-        alert("No se pudo borrar el registro.");
+        alert(`No se pudo borrar: ${error.message || error}`);
       }
     }
   };
@@ -201,7 +292,7 @@ export const OperatorForm: React.FC = () => {
         </div>
       )}
 
-      {/* --- FORMULARIO DE CARGA --- */}
+      {/* --- FORMULARIO --- */}
       <div className={`bg-white rounded-xl shadow-lg overflow-hidden border-t-4 ${borderColor} transition-colors duration-300`}>
         <div className={`${headerBg} p-6 text-white flex justify-between items-center transition-colors duration-300`}>
           <div>
@@ -228,13 +319,16 @@ export const OperatorForm: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">Operario Responsable</label>
-              <select name="operatorName" value={formData.operatorName} onChange={handleChange} disabled={!!editingId} className={`w-full rounded-lg border-slate-300 border p-3 focus:ring-2 focus:ring-${themeColor}-500 outline-none text-slate-900 font-medium bg-slate-50 disabled:opacity-60`} required>
-                <option value="">Seleccione su nombre...</option>
-                {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
-              </select>
-            </div>
+            
+            {/* 1. SELECTOR CON BUSCADOR: OPERARIO */}
+            <SearchableSelect 
+              label="Operario Responsable" 
+              options={operatorList} 
+              value={formData.operatorName} 
+              onChange={(val) => setFormData(prev => ({ ...prev, operatorName: val }))}
+              placeholder="Buscar nombre..."
+              disabled={!!editingId}
+            />
             
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1 uppercase flex items-center gap-1">
@@ -253,14 +347,30 @@ export const OperatorForm: React.FC = () => {
           
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">Sector</label>
-            <select name="sector" value={formData.sector} onChange={handleChange} className="w-full rounded-lg border-amber-200 border-2 p-3 bg-amber-50 font-bold text-slate-900">
+            <select name="sector" value={formData.sector} onChange={handleChange} className="w-full rounded-lg border-amber-200 border-2 p-3 bg-amber-50 font-bold text-slate-900 outline-none">
               {Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className="block text-sm font-bold text-slate-700 mb-1">Modelo / Producto</label><select name="model" value={formData.model} onChange={handleChange} className="w-full rounded-lg border-slate-300 border p-3 text-slate-900 bg-white" required><option value="">Seleccionar...</option>{modelList.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-            <div><label className="block text-sm font-bold text-slate-700 mb-1">Operación Realizada</label><select name="operation" value={formData.operation} onChange={handleChange} className="w-full rounded-lg border-slate-300 border p-3 text-slate-900 bg-white" required><option value="">Seleccionar...</option>{operationList.map(op => <option key={op} value={op}>{op}</option>)}</select></div>
+            
+            {/* 2. SELECTOR CON BUSCADOR: MODELO */}
+            <SearchableSelect 
+              label="Modelo / Producto" 
+              options={modelList} 
+              value={formData.model} 
+              onChange={(val) => setFormData(prev => ({ ...prev, model: val }))}
+              placeholder="Buscar modelo..."
+            />
+
+            {/* 3. SELECTOR CON BUSCADOR: OPERACIÓN */}
+            <SearchableSelect 
+              label="Operación Realizada" 
+              options={operationList} 
+              value={formData.operation} 
+              onChange={(val) => setFormData(prev => ({ ...prev, operation: val }))}
+              placeholder="Buscar operación..."
+            />
           </div>
           
           <div>
@@ -335,7 +445,6 @@ export const OperatorForm: React.FC = () => {
                </thead>
                <tbody className="divide-y divide-slate-50">
                  {operatorHistory.map((day, idx) => {
-                   // Calculamos el % de ese día histórico contra la meta actual
                    const dayPercent = (day.points / dailyTarget) * 100;
                    return (
                      <tr key={idx} className="hover:bg-slate-50">
