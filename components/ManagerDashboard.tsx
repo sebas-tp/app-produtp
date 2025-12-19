@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
-  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity 
+  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, MessageSquare 
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -200,23 +200,25 @@ export const ManagerDashboard: React.FC = () => {
 
     autoTable(doc, {
       startY: 25,
-      head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts']],
+      // AGREGADO: Columna Obs.
+      head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts', 'Obs.']],
       body: filteredLogs.map(l => [
         new Date(l.timestamp).toLocaleDateString(),
         l.orderNumber || '-', 
         l.operatorName,
         l.sector,
         l.model,
-        l.totalPoints.toFixed(1)
+        l.totalPoints.toFixed(1),
+        l.comments ? l.comments.substring(0, 20) + '...' : '-' // Cortado
       ]),
-      theme: 'grid'
+      theme: 'grid',
+      styles: { fontSize: 8 }
     });
 
     doc.save(`Reporte_Ingenieria_${new Date().toISOString().split('T')[0]}.pdf`);
     setIsGeneratingPDF(false);
   };
 
-  // DATOS CALCULADOS
   const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.operatorName]) {
       acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
@@ -313,51 +315,19 @@ export const ManagerDashboard: React.FC = () => {
 
       {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* PANEL LATERAL: RANKING O TABLA DIARIA */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
-          {selectedOperator === 'all' ? (
-            // VISTA GLOBAL: MOSTRAR RANKING
-            <>
-              <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking del Período</h3>
-              <div className="overflow-y-auto flex-1 pr-2 space-y-3">
-                 {operatorStats.map((stat) => (
-                   <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                     <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
-                     <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
-                   </div>
-                 ))}
-              </div>
-            </>
-          ) : (
-            // VISTA INDIVIDUAL: MOSTRAR TABLA DIARIA
-            <>
-              <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Eficiencia Diaria</h3>
-              <div className="overflow-y-auto flex-1">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr><th className="p-2 text-left">Fecha</th><th className="p-2 text-right">Pts</th><th className="p-2 text-right">%</th></tr>
-                  </thead>
-                  <tbody>
-                    {dailyTrend.map((day) => {
-                      const eff = (day.points / dailyTarget) * 100;
-                      return (
-                        <tr key={day.fullDate} className="border-b border-slate-50">
-                          <td className="p-2 font-medium">{day.name}</td>
-                          <td className="p-2 text-right">{day.points.toFixed(0)}</td>
-                          <td className="p-2 text-right"><span className={`px-1.5 py-0.5 rounded text-xs font-bold ${eff>=100?'bg-green-100 text-green-700':(eff>=80?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-700')}`}>{eff.toFixed(0)}%</span></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
+          <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
+          <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+             {operatorStats.map((stat) => (
+               <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                 <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.percentage.toFixed(0)}%</span></div>
+                 <div className="w-full bg-slate-200 rounded-full h-2"><div className={`h-full ${stat.percentage >= 100 ? 'bg-green-500' : 'bg-amber-500'}`} style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+               </div>
+             ))}
+          </div>
         </div>
 
-        {/* GRÁFICO DE TENDENCIA */}
-        <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 lg:col-span-2`}>
+        <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 ${selectedOperator === 'all' ? 'lg:col-span-2' : 'lg:col-span-3'}`}>
           <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={dailyTrend}>
@@ -415,6 +385,8 @@ export const ManagerDashboard: React.FC = () => {
                     <th className="px-6 py-3">Modelo</th>
                     <th className="px-6 py-3 text-right">Cant</th>
                     <th className="px-6 py-3 text-right">Pts</th>
+                    {/* COLUMNA OBS AGREGADA */}
+                    <th className="px-6 py-3 w-48">Obs.</th>
                   </tr>
                </thead>
                <tbody>
@@ -427,6 +399,11 @@ export const ManagerDashboard: React.FC = () => {
                         <td className="px-6 py-4">{log.model} - {log.operation}</td>
                         <td className="px-6 py-4 text-right">{log.quantity}</td>
                         <td className="px-6 py-4 text-right font-bold text-blue-600">{log.totalPoints.toFixed(1)}</td>
+                        
+                        {/* CELDA OBS */}
+                        <td className="px-6 py-4 text-xs text-slate-500 max-w-[150px] truncate" title={log.comments}>
+                          {log.comments || '-'}
+                        </td>
                      </tr>
                   ))}
                </tbody>
