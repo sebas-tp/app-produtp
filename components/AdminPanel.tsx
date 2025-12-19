@@ -5,12 +5,16 @@ import {
   getOperations, saveOperations, 
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
   addNews, deleteNews, getActiveNews, NewsItem,
-  deleteOperatorWithData 
+  deleteOperatorWithData, getLogs // <--- IMPORTANTE: Agregamos getLogs
 } from '../services/dataService';
-import { Sector, PointRule } from '../types';
-import { Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, AlertCircle, FileSearch } from 'lucide-react';
+import { Sector, PointRule, ProductionLog } from '../types';
+import { 
+  Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
+  Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
+  FileSearch, AlertOctagon, ArrowRight 
+} from 'lucide-react';
 
-// --- COMPONENTE GESTOR DE LISTAS (Igual que antes) ---
+// ... (El componente ListManager sigue igual, no lo tocamos) ...
 interface ListManagerProps {
   title: string;
   data: string[];
@@ -99,6 +103,8 @@ export const AdminPanel: React.FC = () => {
   const [operations, setOperations] = useState<string[]>([]);
   
   const [matrix, setMatrix] = useState<PointRule[]>([]);
+  const [logs, setLogs] = useState<ProductionLog[]>([]); // <--- Logs para auditoría
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
 
@@ -113,17 +119,19 @@ export const AdminPanel: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [ops, mods, opers, mtx, news] = await Promise.all([
-        getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews()
+      // Cargamos TODO, incluyendo los logs para poder auditar qué pasó en planta
+      const [ops, mods, opers, mtx, news, productionLogs] = await Promise.all([
+        getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getLogs()
       ]);
-      setOperators(ops); setModels(mods); setOperations(opers); setMatrix(mtx); setActiveNews(news);
+      setOperators(ops); setModels(mods); setOperations(opers); setMatrix(mtx); setActiveNews(news); setLogs(productionLogs);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
+  // ... Funciones de Listas (Igual que antes) ...
   const handleSaveOperators = async (newList: string[]) => { await saveOperators(newList); setOperators(newList); };
   const handleSaveModels = async (newList: string[]) => { await saveModels(newList); setModels(newList); };
   const handleSaveOperations = async (newList: string[]) => { await saveOperations(newList); setOperations(newList); };
-
+  
   const handleSpecialDeleteOperator = async (name: string) => {
     if (window.confirm(`⚠️ ALERTA DE SEGURIDAD ⚠️\n\n¿Eliminar a "${name}" y TODO su historial?`)) {
       setLoading(true);
@@ -133,14 +141,50 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  // --- LÓGICA DE AUDITORÍA ---
-  // Calculamos qué modelos no tienen reglas y qué reglas valen 0
+  // --- LÓGICA DE AUDITORÍA AVANZADA ---
   const auditData = React.useMemo(() => {
+    // 1. Configuraciones teóricas vacías
     const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
-    const rulesWithZeroPoints = matrix.filter(r => r.pointsPerUnit === 0);
-    return { modelsWithoutRules, rulesWithZeroPoints };
-  }, [models, matrix]);
+    
+    // 2. DETECCIÓN REAL: Buscar en logs registros con 0 puntos pero cantidad > 0
+    const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
+    
+    // Agrupar incidentes por "Sector-Modelo-Operacion" para no mostrar repetidos
+    const groupedIncidents: Record<string, { sector: string, model: string, operation: string, count: number, operators: Set<string> }> = {};
+    
+    zeroPointIncidents.forEach(inc => {
+      const key = `${inc.sector}-${inc.model}-${inc.operation}`;
+      if (!groupedIncidents[key]) {
+        groupedIncidents[key] = { 
+          sector: inc.sector as string, 
+          model: inc.model, 
+          operation: inc.operation, 
+          count: 0, 
+          operators: new Set() 
+        };
+      }
+      groupedIncidents[key].count++;
+      groupedIncidents[key].operators.add(inc.operatorName);
+    });
 
+    return { 
+      modelsWithoutRules, 
+      missingRules: Object.values(groupedIncidents) 
+    };
+  }, [models, matrix, logs]);
+
+  // Función para rellenar el formulario desde una alerta
+  const fixMissingRule = (item: { sector: string, model: string, operation: string }) => {
+    setNewRule({ 
+      sector: item.sector as Sector, 
+      model: item.model, 
+      operation: item.operation, 
+      pointsPerUnit: 0 
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // ... Resto de funciones (Matriz, Noticias, Import) Igual que antes ...
   const handleEditClick = (rule: PointRule) => {
     setEditingId(rule.id!); 
     setNewRule({ sector: rule.sector, model: rule.model, operation: rule.operation, pointsPerUnit: rule.pointsPerUnit });
@@ -207,6 +251,7 @@ export const AdminPanel: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
+      {/* HEADER (Igual) */}
       <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md border-l-4 border-orange-600">
         <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
         <div className="flex flex-wrap gap-4 mt-6">
@@ -227,37 +272,58 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'matrix' && (
         <div className="space-y-6">
-          {/* --- PANEL DE AUDITORÍA --- */}
+          
+          {/* --- SECCIÓN DE AUDITORÍA (MEJORADA) --- */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-start gap-3">
-               <div className="bg-red-100 p-2 rounded-full"><AlertTriangle className="w-5 h-5 text-red-600"/></div>
-               <div>
-                 <h4 className="font-bold text-red-800 text-sm">Productos sin Puntos Asignados </h4>
-                 <p className="text-xs text-red-600 mb-2">Modelos en catálogo que no tienen ninguna regla en la matriz.</p>
-                 <div className="text-2xl font-black text-red-700">{auditData.modelsWithoutRules.length}</div>
+             
+             {/* TARJETA 1: MODELOS FANTASMA (Sin reglas) */}
+             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3">
+               <div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div>
+               <div className="flex-1">
+                 <h4 className="font-bold text-slate-800 text-sm">Productos sin Configurar</h4>
+                 <p className="text-xs text-slate-500 mb-2">Modelos que no tienen ninguna regla de precio.</p>
+                 <div className="text-2xl font-black text-slate-700">{auditData.modelsWithoutRules.length}</div>
                  {auditData.modelsWithoutRules.length > 0 && (
-                   <div className="mt-2 text-xs text-red-800 bg-red-100 p-2 rounded max-h-20 overflow-y-auto">
+                   <div className="mt-2 text-xs text-slate-600 bg-slate-100 p-2 rounded max-h-24 overflow-y-auto">
                      {auditData.modelsWithoutRules.join(', ')}
                    </div>
                  )}
                </div>
              </div>
 
-             <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl flex items-start gap-3">
-               <div className="bg-orange-100 p-2 rounded-full"><FileSearch className="w-5 h-5 text-orange-600"/></div>
-               <div>
-                 <h4 className="font-bold text-orange-800 text-sm">Reglas con Valor 0</h4>
-                 <p className="text-xs text-orange-600 mb-2">Operaciones configuradas pero que valen 0 puntos.</p>
-                 <div className="text-2xl font-black text-orange-700">{auditData.rulesWithZeroPoints.length}</div>
-                 {auditData.rulesWithZeroPoints.length > 0 && (
-                   <div className="mt-2 text-xs text-orange-800 bg-orange-100 p-2 rounded max-h-20 overflow-y-auto">
-                     {auditData.rulesWithZeroPoints.map(r => `${r.model} (${r.operation})`).join(', ')}
+             {/* TARJETA 2: BUZÓN DE ALERTAS DE PLANTA (Incidentes Reales) */}
+             <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-start gap-3 shadow-sm">
+               <div className="bg-red-100 p-2 rounded-full animate-pulse"><AlertOctagon className="w-5 h-5 text-red-600"/></div>
+               <div className="flex-1">
+                 <h4 className="font-bold text-red-800 text-sm">Alertas de Planta (Hechos Reales)</h4>
+                 <p className="text-xs text-red-600 mb-2">Operaciones que los empleados reportaron pero valen 0 puntos.</p>
+                 
+                 {auditData.missingRules.length === 0 ? (
+                   <div className="text-sm font-bold text-green-700 flex items-center gap-1"><Check className="w-4 h-4"/> ¡Todo en orden!</div>
+                 ) : (
+                   <div className="space-y-2 mt-2 max-h-40 overflow-y-auto pr-1">
+                     {auditData.missingRules.map((item, idx) => (
+                       <div key={idx} className="bg-white p-2 rounded border border-red-100 flex justify-between items-center group">
+                         <div>
+                           <div className="text-xs font-bold text-slate-800">{item.model} - {item.operation}</div>
+                           <div className="text-[10px] text-slate-500">{item.sector} • Reportado {item.count} veces</div>
+                           <div className="text-[10px] text-red-400 truncate w-32">Por: {Array.from(item.operators).join(', ')}</div>
+                         </div>
+                         <button 
+                           onClick={() => fixMissingRule(item)} 
+                           className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700 flex items-center gap-1 shadow-sm"
+                         >
+                           Solucionar <ArrowRight className="w-3 h-3"/>
+                         </button>
+                       </div>
+                     ))}
                    </div>
                  )}
                </div>
              </div>
           </div>
 
+          {/* FORMULARIO DE REGLAS (Igual que antes) */}
           <div className={`bg-white p-6 rounded-xl shadow-sm border ${editingId ? 'border-blue-500' : 'border-orange-100'} transition-colors`}>
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -299,6 +365,7 @@ export const AdminPanel: React.FC = () => {
               </div>
             </div>
           </div>
+          
           <div className="bg-white rounded-xl shadow-sm overflow-hidden border-t-2 border-orange-200">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
