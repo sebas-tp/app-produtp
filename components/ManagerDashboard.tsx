@@ -144,13 +144,24 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  // --- FUNCIÓN DE EXPORTACIÓN PDF MEJORADA ---
+  // --- CÁLCULOS PREVIOS (Necesarios para el PDF) ---
+  const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
+    const date = log.timestamp.split('T')[0]; 
+    const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
+    if (!acc[date]) acc[date] = { fullDate: date, name: shortDate, points: 0, quantity: 0 };
+    acc[date].points += log.totalPoints;
+    acc[date].quantity += log.quantity;
+    return acc;
+  }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
+  .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
+
+  // --- FUNCIÓN DE EXPORTACIÓN PDF ---
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     
-    // 1. PORTADA Y TEXTO
+    // 1. PORTADA
     doc.setFontSize(22);
     doc.setTextColor(30, 41, 59);
     doc.text(`Informe Técnico de Producción`, 14, 20);
@@ -163,7 +174,7 @@ export const ManagerDashboard: React.FC = () => {
 
     let currentY = 50;
 
-    // Análisis IA
+    // SECCIÓN 1: ANÁLISIS IA
     if (analysisResult) {
       doc.setDrawColor(200);
       doc.line(14, 45, pageWidth - 14, 45);
@@ -175,14 +186,13 @@ export const ManagerDashboard: React.FC = () => {
 
       doc.setFontSize(10);
       doc.setTextColor(0);
-      // Limpiamos caracteres de markdown
       const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/•/g, '-');
       const splitText = doc.splitTextToSize(cleanText, 180);
       doc.text(splitText, 14, currentY);
       currentY += (splitText.length * 5) + 10;
     }
 
-    // 2. GRÁFICOS (Captura Secuencial)
+    // SECCIÓN 2: GRÁFICOS
     try {
       doc.addPage();
       doc.setFontSize(14);
@@ -190,57 +200,81 @@ export const ManagerDashboard: React.FC = () => {
       doc.text("2. Métricas Visuales", 14, 20);
       let chartY = 30;
 
-      // Esperamos un momento para asegurar renderizado
       await new Promise(r => setTimeout(r, 500)); 
 
-      // Gráfico 1: Tendencia
       const chartTrend = document.getElementById('chart-trend');
       if (chartTrend) {
         doc.setFontSize(11);
         doc.setTextColor(50);
         doc.text("Evolución Diaria de Producción", 14, chartY);
         const canvas1 = await html2canvas(chartTrend, { scale: 2, backgroundColor: '#ffffff' });
-        const img1 = canvas1.toDataURL('image/png');
-        doc.addImage(img1, 'PNG', 14, chartY + 5, 180, 70);
+        doc.addImage(canvas1.toDataURL('image/png'), 'PNG', 14, chartY + 5, 180, 70);
         chartY += 85;
       }
 
-      // Gráfico 2: Sectores
       const chartSector = document.getElementById('chart-sector');
       if (chartSector) {
         doc.text("Distribución por Sector", 14, chartY);
         const canvas2 = await html2canvas(chartSector, { scale: 2, backgroundColor: '#ffffff' });
-        const img2 = canvas2.toDataURL('image/png');
-        doc.addImage(img2, 'PNG', 14, chartY + 5, 180, 70);
+        doc.addImage(canvas2.toDataURL('image/png'), 'PNG', 14, chartY + 5, 180, 70);
         chartY += 85;
       }
 
-      // Gráfico 3: Modelos (NUEVO)
       const chartModels = document.getElementById('chart-models');
       if (chartModels) {
-        // Si no entra en la página, nueva página
-        if (chartY > 200) {
-          doc.addPage();
-          chartY = 20;
-        }
+        if (chartY > 200) { doc.addPage(); chartY = 20; }
         doc.text("Top 5 Modelos Fabricados", 14, chartY);
         const canvas3 = await html2canvas(chartModels, { scale: 2, backgroundColor: '#ffffff' });
-        const img3 = canvas3.toDataURL('image/png');
-        doc.addImage(img3, 'PNG', 14, chartY + 5, 180, 70);
+        doc.addImage(canvas3.toDataURL('image/png'), 'PNG', 14, chartY + 5, 180, 70);
       }
 
-    } catch (e) {
-      console.error("Error capturando gráficos:", e);
-    }
+    } catch (e) { console.error("Error capturando gráficos:", e); }
 
-    // 3. TABLA DE DATOS
+    // SECCIÓN 3: TABLA DE EFICIENCIA DIARIA (NUEVO)
     doc.addPage();
     doc.setFontSize(14);
     doc.setTextColor(79, 70, 229);
-    doc.text("3. Registro Detallado", 14, 20);
+    doc.text("3. Resumen de Eficiencia Diaria", 14, 20);
+
+    const efficiencyRows = dailyTrend.map(day => {
+      const percentage = (day.points / dailyTarget) * 100;
+      return [
+        new Date(day.fullDate).toLocaleDateString(), // Fecha completa
+        day.points.toLocaleString('es-AR'),          // Puntos con miles
+        dailyTarget.toLocaleString('es-AR'),         // Meta
+        percentage.toFixed(1) + '%'                  // Porcentaje
+      ];
+    });
 
     autoTable(doc, {
       startY: 25,
+      head: [['Fecha', 'Puntos Realizados', 'Meta Estándar', '% Eficiencia']],
+      body: efficiencyRows,
+      theme: 'grid',
+      headStyles: { fillColor: [50, 50, 50] },
+      styles: { halign: 'center' },
+      columnStyles: { 
+        0: { halign: 'left' },
+        3: { fontStyle: 'bold' } 
+      }
+    });
+
+    // SECCIÓN 4: REGISTRO DETALLADO
+    doc.setFontSize(14);
+    doc.setTextColor(79, 70, 229);
+    // Usamos finalY de la tabla anterior para saber donde escribir, o agregamos pagina si falta espacio
+    const finalY = (doc as any).lastAutoTable.finalY || 25;
+    
+    // Si queda poco espacio, saltamos pagina
+    if (finalY > 250) {
+       doc.addPage();
+       doc.text("4. Registro Detallado de Operaciones", 14, 20);
+    } else {
+       doc.text("4. Registro Detallado de Operaciones", 14, finalY + 15);
+    }
+
+    autoTable(doc, {
+      startY: finalY > 250 ? 25 : finalY + 20,
       head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts', 'Obs.']],
       body: filteredLogs.map(l => [
         new Date(l.timestamp).toLocaleDateString(),
@@ -253,14 +287,14 @@ export const ManagerDashboard: React.FC = () => {
       ]),
       theme: 'grid',
       styles: { fontSize: 8 },
-      headStyles: { fillColor: [79, 70, 229] } // Color Indigo encabezado
+      headStyles: { fillColor: [79, 70, 229] }
     });
 
     doc.save(`Reporte_Ingenieria_${new Date().toISOString().split('T')[0]}.pdf`);
     setIsGeneratingPDF(false);
   };
 
-  // --- CÁLCULOS ---
+  // --- MÁS CÁLCULOS ---
   const rankingStats = Object.values(
     filteredLogs
       .filter(log => rankingFilter === 'Global' || log.sector === rankingFilter)
@@ -281,16 +315,6 @@ export const ManagerDashboard: React.FC = () => {
     acc[log.sector].value += log.quantity;
     return acc;
   }, {} as Record<string, { name: string; value: number }>));
-
-  const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
-    const date = log.timestamp.split('T')[0]; 
-    const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
-    if (!acc[date]) acc[date] = { fullDate: date, name: shortDate, points: 0, quantity: 0 };
-    acc[date].points += log.totalPoints;
-    acc[date].quantity += log.quantity;
-    return acc;
-  }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
-  .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
 
   const modelStats = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.model]) acc[log.model] = { name: log.model, value: 0 };
