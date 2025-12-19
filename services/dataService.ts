@@ -62,7 +62,7 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
         startTime: data.startTime || '',
         endTime: data.endTime || '',
         orderNumber: data.orderNumber || '',
-        comments: data.comments || '' // <--- LEEMOS LOS COMENTARIOS
+        comments: data.comments || '' 
       } as ProductionLog;
     });
   } catch (error) {
@@ -235,7 +235,6 @@ export const downloadCSV = (logs: ProductionLog[], filename: string) => {
   if (logs.length === 0) { alert("No hay datos."); return; }
   
   const delimiter = ";"; 
-  // AGREGAMOS 'Comentarios' AL FINAL
   const headers = ["ID", "Fecha", "Orden", "Operario", "Sector", "Modelo", "Operacion", "Cantidad", "Total Puntos", "Comentarios"];
   
   const rows = logs.map(log => [
@@ -248,7 +247,7 @@ export const downloadCSV = (logs: ProductionLog[], filename: string) => {
     log.operation,
     log.quantity,
     log.totalPoints.toFixed(2).replace('.', ','),
-    `"${log.comments || ''}"` // Evitamos romper CSV si hay comas
+    `"${log.comments || ''}"` 
   ]);
 
   const csvContent = "\uFEFF" + [headers.join(delimiter), ...rows.map(r => r.join(delimiter))].join("\n");
@@ -276,7 +275,6 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
   doc.setFontSize(10);
   doc.text(`Total Unidades: ${totalQty} | Total Puntos: ${totalPts.toFixed(1)}`, 14, 28);
 
-  // AGREGAMOS 'Obs.' AL FINAL
   const tableColumn = ["Fecha", "Orden", "Operario", "Modelo", "Op", "Cant", "Pts", "Obs."];
   const tableRows = logs.map(log => [
     new Date(log.timestamp).toLocaleDateString(),
@@ -286,7 +284,7 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
     log.operation,
     log.quantity,
     log.totalPoints.toFixed(1),
-    log.comments ? log.comments.substring(0, 15) + '...' : '-' // Recortado para que entre
+    log.comments ? log.comments.substring(0, 15) + '...' : '-' 
   ]);
 
   autoTable(doc, {
@@ -295,7 +293,72 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
     startY: 35,
     theme: 'grid',
     headStyles: { fillColor: [217, 119, 6] }, 
-    styles: { fontSize: 8 }, // Letra un poco más chica
+    styles: { fontSize: 8 }, 
   });
   doc.save(`${filename}.pdf`);
+};
+
+// =========================================================
+// 8. SISTEMA DE RESTAURACIÓN (BACKUP)
+// =========================================================
+
+export const restoreSystemFromBackup = async (backupData: any) => {
+  try {
+    const batch = writeBatch(db);
+    
+    // NOTA: writeBatch tiene límite de 500 operaciones.
+    // Para simplificar, aquí hacemos escrituras directas si son muchas,
+    // o usamos el batch si son pocas. En un sistema real masivo se usan batches paginados.
+    // Aquí usaremos una estrategia híbrida segura: Promesas paralelas.
+
+    // 1. Restaurar Configuración (Listas)
+    if (backupData.config) {
+      if (backupData.config.operators) await saveOperators(backupData.config.operators);
+      if (backupData.config.models) await saveModels(backupData.config.models);
+      if (backupData.config.operations) await saveOperations(backupData.config.operations);
+    }
+
+    // 2. Restaurar Matriz de Puntos
+    if (backupData.matrix && Array.isArray(backupData.matrix)) {
+      for (const rule of backupData.matrix) {
+        const ref = rule.id ? doc(db, 'points_matrix', rule.id) : doc(collection(db, 'points_matrix'));
+        const { id, ...data } = rule; 
+        await setDoc(ref, data, { merge: true });
+      }
+    }
+
+    // 3. Restaurar Noticias
+    if (backupData.news && Array.isArray(backupData.news)) {
+      for (const item of backupData.news) {
+        const ref = doc(db, 'news', item.id);
+        const { id, ...data } = item;
+        await setDoc(ref, data, { merge: true });
+      }
+    }
+
+    // 4. Restaurar LOGS (Producción)
+    if (backupData.logs && Array.isArray(backupData.logs)) {
+      // Bloques de 50 para no saturar
+      const chunkSize = 50;
+      for (let i = 0; i < backupData.logs.length; i += chunkSize) {
+        const chunk = backupData.logs.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(async (log: any) => {
+          const ref = log.id ? doc(db, 'production_logs', log.id) : doc(collection(db, 'production_logs'));
+          const { id, ...data } = log;
+          // Normalización de datos antiguos por si acaso
+          const cleanData = {
+            ...data,
+            operator: data.operatorName || data.operator,
+            points: data.totalPoints || data.points
+          };
+          await setDoc(ref, cleanData, { merge: true });
+        }));
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error crítico en restauración:", error);
+    return false;
+  }
 };
