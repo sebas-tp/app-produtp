@@ -5,7 +5,7 @@ import {
   getOperations, saveOperations, 
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
   addNews, deleteNews, getActiveNews, NewsItem,
-  deleteOperatorWithData, getLogs // <--- IMPORTANTE: Agregamos getLogs
+  deleteOperatorWithData, getLogs 
 } from '../services/dataService';
 import { Sector, PointRule, ProductionLog } from '../types';
 import { 
@@ -14,7 +14,7 @@ import {
   FileSearch, AlertOctagon, ArrowRight 
 } from 'lucide-react';
 
-// ... (El componente ListManager sigue igual, no lo tocamos) ...
+// --- COMPONENTE GESTOR DE LISTAS ---
 interface ListManagerProps {
   title: string;
   data: string[];
@@ -103,7 +103,7 @@ export const AdminPanel: React.FC = () => {
   const [operations, setOperations] = useState<string[]>([]);
   
   const [matrix, setMatrix] = useState<PointRule[]>([]);
-  const [logs, setLogs] = useState<ProductionLog[]>([]); // <--- Logs para auditoría
+  const [logs, setLogs] = useState<ProductionLog[]>([]); 
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
@@ -119,7 +119,6 @@ export const AdminPanel: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Cargamos TODO, incluyendo los logs para poder auditar qué pasó en planta
       const [ops, mods, opers, mtx, news, productionLogs] = await Promise.all([
         getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getLogs()
       ]);
@@ -127,7 +126,6 @@ export const AdminPanel: React.FC = () => {
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // ... Funciones de Listas (Igual que antes) ...
   const handleSaveOperators = async (newList: string[]) => { await saveOperators(newList); setOperators(newList); };
   const handleSaveModels = async (newList: string[]) => { await saveModels(newList); setModels(newList); };
   const handleSaveOperations = async (newList: string[]) => { await saveOperations(newList); setOperations(newList); };
@@ -141,50 +139,27 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  // --- LÓGICA DE AUDITORÍA AVANZADA ---
+  // --- LÓGICA DE AUDITORÍA ---
   const auditData = React.useMemo(() => {
-    // 1. Configuraciones teóricas vacías
     const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
-    
-    // 2. DETECCIÓN REAL: Buscar en logs registros con 0 puntos pero cantidad > 0
     const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
-    
-    // Agrupar incidentes por "Sector-Modelo-Operacion" para no mostrar repetidos
     const groupedIncidents: Record<string, { sector: string, model: string, operation: string, count: number, operators: Set<string> }> = {};
-    
     zeroPointIncidents.forEach(inc => {
       const key = `${inc.sector}-${inc.model}-${inc.operation}`;
       if (!groupedIncidents[key]) {
-        groupedIncidents[key] = { 
-          sector: inc.sector as string, 
-          model: inc.model, 
-          operation: inc.operation, 
-          count: 0, 
-          operators: new Set() 
-        };
+        groupedIncidents[key] = { sector: inc.sector as string, model: inc.model, operation: inc.operation, count: 0, operators: new Set() };
       }
       groupedIncidents[key].count++;
       groupedIncidents[key].operators.add(inc.operatorName);
     });
-
-    return { 
-      modelsWithoutRules, 
-      missingRules: Object.values(groupedIncidents) 
-    };
+    return { modelsWithoutRules, missingRules: Object.values(groupedIncidents) };
   }, [models, matrix, logs]);
 
-  // Función para rellenar el formulario desde una alerta
   const fixMissingRule = (item: { sector: string, model: string, operation: string }) => {
-    setNewRule({ 
-      sector: item.sector as Sector, 
-      model: item.model, 
-      operation: item.operation, 
-      pointsPerUnit: 0 
-    });
+    setNewRule({ sector: item.sector as Sector, model: item.model, operation: item.operation, pointsPerUnit: 0 });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // ... Resto de funciones (Matriz, Noticias, Import) Igual que antes ...
   const handleEditClick = (rule: PointRule) => {
     setEditingId(rule.id!); 
     setNewRule({ sector: rule.sector, model: rule.model, operation: rule.operation, pointsPerUnit: rule.pointsPerUnit });
@@ -251,7 +226,6 @@ export const AdminPanel: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
-      {/* HEADER (Igual) */}
       <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md border-l-4 border-orange-600">
         <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
         <div className="flex flex-wrap gap-4 mt-6">
@@ -272,11 +246,8 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'matrix' && (
         <div className="space-y-6">
-          
-          {/* --- SECCIÓN DE AUDITORÍA (MEJORADA) --- */}
+          {/* AUDITORÍA */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             
-             {/* TARJETA 1: MODELOS FANTASMA (Sin reglas) */}
              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3">
                <div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div>
                <div className="flex-1">
@@ -290,14 +261,11 @@ export const AdminPanel: React.FC = () => {
                  )}
                </div>
              </div>
-
-             {/* TARJETA 2: BUZÓN DE ALERTAS DE PLANTA (Incidentes Reales) */}
              <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-start gap-3 shadow-sm">
                <div className="bg-red-100 p-2 rounded-full animate-pulse"><AlertOctagon className="w-5 h-5 text-red-600"/></div>
                <div className="flex-1">
                  <h4 className="font-bold text-red-800 text-sm">Alertas de Planta (Hechos Reales)</h4>
                  <p className="text-xs text-red-600 mb-2">Operaciones que los empleados reportaron pero valen 0 puntos.</p>
-                 
                  {auditData.missingRules.length === 0 ? (
                    <div className="text-sm font-bold text-green-700 flex items-center gap-1"><Check className="w-4 h-4"/> ¡Todo en orden!</div>
                  ) : (
@@ -309,12 +277,7 @@ export const AdminPanel: React.FC = () => {
                            <div className="text-[10px] text-slate-500">{item.sector} • Reportado {item.count} veces</div>
                            <div className="text-[10px] text-red-400 truncate w-32">Por: {Array.from(item.operators).join(', ')}</div>
                          </div>
-                         <button 
-                           onClick={() => fixMissingRule(item)} 
-                           className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700 flex items-center gap-1 shadow-sm"
-                         >
-                           Solucionar <ArrowRight className="w-3 h-3"/>
-                         </button>
+                         <button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700 flex items-center gap-1 shadow-sm">Solucionar <ArrowRight className="w-3 h-3"/></button>
                        </div>
                      ))}
                    </div>
@@ -323,7 +286,7 @@ export const AdminPanel: React.FC = () => {
              </div>
           </div>
 
-          {/* FORMULARIO DE REGLAS (Igual que antes) */}
+          {/* FORMULARIO */}
           <div className={`bg-white p-6 rounded-xl shadow-sm border ${editingId ? 'border-blue-500' : 'border-orange-100'} transition-colors`}>
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -333,40 +296,41 @@ export const AdminPanel: React.FC = () => {
               {editingId && <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">MODO EDICIÓN</span>}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase">Sector</label>
-                <select className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none" value={newRule.sector} onChange={e => setNewRule({...newRule, sector: e.target.value as Sector})}>
-                  {Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase">Modelo</label>
-                <select className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none" value={newRule.model} onChange={e => setNewRule({...newRule, model: e.target.value})}>
-                  <option value="">Seleccionar...</option>
-                  {models.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase">Operación</label>
-                <select className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none" value={newRule.operation} onChange={e => setNewRule({...newRule, operation: e.target.value})}>
-                   <option value="">Seleccionar...</option>
-                  {operations.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase">Puntos (Unitario)</label>
-                <input type="number" step="0.1" className="w-full border border-slate-300 p-2 rounded font-bold text-slate-800 bg-white outline-none" value={newRule.pointsPerUnit} onChange={e => setNewRule({...newRule, pointsPerUnit: parseFloat(e.target.value)})}/>
-              </div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Sector</label><select className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none" value={newRule.sector} onChange={e => setNewRule({...newRule, sector: e.target.value as Sector})}>{Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Modelo</label><select className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none" value={newRule.model} onChange={e => setNewRule({...newRule, model: e.target.value})}><option value="">Seleccionar...</option>{models.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Operación</label><select className="w-full border border-slate-300 p-2 rounded bg-slate-50 text-slate-900 outline-none" value={newRule.operation} onChange={e => setNewRule({...newRule, operation: e.target.value})}><option value="">Seleccionar...</option>{operations.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Puntos (Unitario)</label><input type="number" step="0.1" className="w-full border border-slate-300 p-2 rounded font-bold text-slate-800 bg-white outline-none" value={newRule.pointsPerUnit} onChange={e => setNewRule({...newRule, pointsPerUnit: parseFloat(e.target.value)})}/></div>
               <div className="flex gap-2">
                 {editingId && <button onClick={handleCancelEdit} className="bg-slate-200 text-slate-600 font-bold py-2 px-3 rounded hover:bg-slate-300"><X className="w-4 h-4" /></button>}
-                <button onClick={handleSaveRule} disabled={loading} className={`${editingId ? 'bg-blue-600' : 'bg-orange-600'} text-white font-bold py-2 px-4 rounded flex-1 flex items-center justify-center gap-2 hover:opacity-90`}>
-                  {editingId ? 'Actualizar' : 'Agregar'}
-                </button>
+                <button onClick={handleSaveRule} disabled={loading} className={`${editingId ? 'bg-blue-600' : 'bg-orange-600'} text-white font-bold py-2 px-4 rounded flex-1 flex items-center justify-center gap-2 hover:opacity-90`}>{editingId ? 'Actualizar' : 'Agregar'}</button>
               </div>
             </div>
           </div>
           
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden border-t-2 border-orange-200">
+          {/* TABLA RESPONSIVA (Tarjetas en Mobile / Tabla en Desktop) */}
+          <div className="grid grid-cols-1 gap-4 md:hidden">
+            {matrix.map((rule) => (
+              <div key={rule.id} className={`bg-white p-4 rounded-xl shadow-sm border-l-4 ${editingId === rule.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-orange-500'}`}>
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h4 className="font-bold text-slate-800">{rule.model}</h4>
+                    <span className="text-[10px] uppercase font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded">{rule.sector}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-black text-orange-600">{rule.pointsPerUnit} <span className="text-xs font-normal text-slate-400">pts</span></div>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-600 mb-3 border-b border-slate-50 pb-2">{rule.operation}</p>
+                <div className="flex justify-end gap-3">
+                   <button onClick={() => handleEditClick(rule)} className="flex items-center gap-1 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg"> <Pencil className="w-3 h-3"/> Editar</button>
+                   <button onClick={() => handleDeleteRule(rule.id)} className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-50 px-3 py-2 rounded-lg"> <Trash2 className="w-3 h-3"/> Borrar</button>
+                </div>
+              </div>
+            ))}
+            {matrix.length === 0 && <p className="text-center text-slate-400 py-10">No hay reglas.</p>}
+          </div>
+
+          <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border-t-2 border-orange-200">
             <table className="w-full text-sm text-left">
               <thead className="bg-slate-100 text-slate-600 uppercase text-xs font-bold">
                 <tr><th className="px-6 py-3">Sector</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3">Operación</th><th className="px-6 py-3 text-right">Pts/Unidad</th><th className="px-6 py-3 text-center">Acción</th></tr>
@@ -381,6 +345,7 @@ export const AdminPanel: React.FC = () => {
                     </td>
                   </tr>
                 ))}
+                {matrix.length === 0 && <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No hay reglas definidas.</td></tr>}
               </tbody>
             </table>
           </div>
