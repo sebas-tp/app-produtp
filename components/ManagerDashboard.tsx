@@ -4,13 +4,13 @@ import {
   getProductivityTarget, saveProductivityTarget, getOperators 
 } from '../services/dataService';
 import { analyzeProductionData } from '../services/geminiService';
-import { ProductionLog } from '../types';
+import { ProductionLog, Sector } from '../types';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from 'recharts';
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
-  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity 
+  Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter 
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -29,6 +29,9 @@ export const ManagerDashboard: React.FC = () => {
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedOperator, setSelectedOperator] = useState<string>('all');
+  
+  // NUEVO: Filtro independiente para el ranking
+  const [rankingFilter, setRankingFilter] = useState<string>('Global');
 
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
   const [isEditingTarget, setIsEditingTarget] = useState(false);
@@ -61,10 +64,7 @@ export const ManagerDashboard: React.FC = () => {
     init();
   }, []);
 
-  useEffect(() => { 
-    applyFilters(); 
-    setAnalysisResult(''); 
-  }, [allLogs, startDate, endDate, selectedOperator]);
+  useEffect(() => { applyFilters(); }, [allLogs, startDate, endDate, selectedOperator]);
 
   const refreshData = async () => {
     setLoading(true);
@@ -101,16 +101,8 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  const handleDownloadExcel = () => {
-    const filename = `Reporte_${selectedOperator === 'all' ? 'Global' : selectedOperator}_${startDate}_al_${endDate}`;
-    downloadCSV(filteredLogs, filename);
-  };
-
-  const handleDownloadStandardPDF = () => {
-    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
-    const filename = `Reporte_${startDate}_al_${endDate}`;
-    downloadPDF(filteredLogs, title, filename);
-  };
+  const handleDownloadExcel = () => downloadCSV(filteredLogs, `Reporte_${startDate}_${endDate}`);
+  const handleDownloadStandardPDF = () => downloadPDF(filteredLogs, `Reporte ${startDate} al ${endDate}`, `Reporte_${startDate}`);
 
   const handleEngineeringAccess = () => {
     if (isAuthorized) openEngineeringModal();
@@ -122,7 +114,6 @@ export const ManagerDashboard: React.FC = () => {
     if (passwordInput === MASTER_PASSWORD) {
       setIsAuthorized(true);
       setShowAuthModal(false);
-      setPasswordInput('');
       openEngineeringModal();
     } else {
       alert("Acceso denegado.");
@@ -149,24 +140,16 @@ export const ManagerDashboard: React.FC = () => {
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
-    const title = `Reporte de Ingeniería TopSafe`;
-    
     doc.setFontSize(18);
-    doc.text(title, 14, 20);
+    doc.text(`Reporte de Ingeniería TopSafe`, 14, 20);
     doc.setFontSize(10);
-    doc.text(`Generado por: Ingeniería | Fecha: ${new Date().toLocaleDateString()}`, 14, 26);
-    doc.text(`Filtro: ${selectedOperator} | ${startDate} al ${endDate}`, 14, 32);
-
+    doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 26);
     let startY = 40;
 
     if (analysisResult) {
-      doc.setFontSize(12);
-      doc.setTextColor(234, 88, 12);
-      doc.text("Análisis Inteligente", 14, startY);
-      doc.setFontSize(10);
-      doc.setTextColor(0);
-      const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/>/g, '');
-      const splitText = doc.splitTextToSize(cleanText, 180);
+      doc.setFontSize(12); doc.setTextColor(234, 88, 12); doc.text("Análisis Inteligente", 14, startY);
+      doc.setFontSize(10); doc.setTextColor(0);
+      const splitText = doc.splitTextToSize(analysisResult.replace(/\*/g, ''), 180);
       doc.text(splitText, 14, startY + 8);
       startY += 10 + (splitText.length * 5); 
     }
@@ -174,60 +157,43 @@ export const ManagerDashboard: React.FC = () => {
     try {
       await new Promise(r => setTimeout(r, 500)); 
       const chartTrend = document.getElementById('chart-trend');
-      const chartSector = document.getElementById('chart-sector');
-      
       if (chartTrend) {
-        doc.addPage(); 
-        doc.setFontSize(14);
-        doc.text("Evolución de Producción", 14, 20);
+        doc.addPage();
         const canvas1 = await html2canvas(chartTrend, { scale: 2, backgroundColor: '#ffffff' });
-        const img1 = canvas1.toDataURL('image/png');
-        doc.addImage(img1, 'PNG', 14, 30, 180, 80); 
+        doc.addImage(canvas1.toDataURL('image/png'), 'PNG', 14, 30, 180, 80); 
       }
-
-      if (chartSector) {
-        doc.text("Distribución por Sector", 14, 120);
-        const canvas2 = await html2canvas(chartSector, { scale: 2, backgroundColor: '#ffffff' });
-        const img2 = canvas2.toDataURL('image/png');
-        doc.addImage(img2, 'PNG', 14, 130, 180, 80);
-      }
-    } catch (e) {
-      console.error("Error gráficos:", e);
-    }
+    } catch (e) { console.error(e); }
 
     doc.addPage();
-    doc.text("Detalle de Registros", 14, 20);
-
     autoTable(doc, {
       startY: 25,
-      // AGREGADO: Columna Obs. al PDF
       head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts', 'Obs.']],
       body: filteredLogs.map(l => [
-        new Date(l.timestamp).toLocaleDateString(),
-        l.orderNumber || '-', 
-        l.operatorName,
-        l.sector,
-        l.model,
-        l.totalPoints.toFixed(1),
-        l.comments ? l.comments.substring(0, 25) + '...' : '-'
+        new Date(l.timestamp).toLocaleDateString(), l.orderNumber || '-', l.operatorName, l.sector, l.model, l.totalPoints.toFixed(1), l.comments ? l.comments.substring(0, 20) + '...' : '-'
       ]),
-      theme: 'grid',
-      styles: { fontSize: 8 }
+      theme: 'grid', styles: { fontSize: 8 }
     });
-
-    doc.save(`Reporte_Ingenieria_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reporte_Ingenieria.pdf`);
     setIsGeneratingPDF(false);
   };
 
-  // DATOS CALCULADOS
-  const operatorStats = Object.values(filteredLogs.reduce((acc, log) => {
-    if (!acc[log.operatorName]) {
-      acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
-    }
-    acc[log.operatorName].points += log.totalPoints;
-    acc[log.operatorName].quantity += log.quantity;
-    return acc;
-  }, {} as Record<string, { name: string; points: number; quantity: number }>))
+  // --- CÁLCULOS ---
+
+  // 1. Ranking Inteligente (Filtrable por Sector)
+  const rankingStats = Object.values(
+    // Usamos 'filteredLogs' (que ya tiene filtro de fecha)
+    filteredLogs
+      // Aplicamos el filtro de sector SOLO para el ranking
+      .filter(log => rankingFilter === 'Global' || log.sector === rankingFilter)
+      .reduce((acc, log) => {
+        if (!acc[log.operatorName]) {
+          acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
+        }
+        acc[log.operatorName].points += log.totalPoints;
+        acc[log.operatorName].quantity += log.quantity;
+        return acc;
+      }, {} as Record<string, { name: string; points: number; quantity: number }>)
+  )
   .map(stat => ({ ...stat, percentage: (stat.points / dailyTarget) * 100 }))
   .sort((a, b) => b.points - a.points);
 
@@ -251,8 +217,7 @@ export const ManagerDashboard: React.FC = () => {
     if (!acc[log.model]) acc[log.model] = { name: log.model, value: 0 };
     acc[log.model].value += log.quantity;
     return acc;
-  }, {} as Record<string, { name: string; value: number }>))
-  .sort((a, b) => b.value - a.value).slice(0, 5);
+  }, {} as Record<string, { name: string; value: number }>)).sort((a, b) => b.value - a.value).slice(0, 5);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
 
@@ -260,13 +225,12 @@ export const ManagerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8 p-4 md:p-8">
-      {/* HEADER */}
+      {/* HEADER PRINCIPAL */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
            <p className="text-slate-500 text-sm">Resumen de producción y métricas</p>
         </div>
-
         <div className="flex flex-col md:flex-row gap-3 items-center w-full xl:w-auto flex-wrap">
           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
              <Users className="w-4 h-4 text-slate-500" />
@@ -276,23 +240,18 @@ export const ManagerDashboard: React.FC = () => {
                 {operatorList.map(op => <option key={op} value={op}>{op}</option>)}
              </select>
           </div>
-
           <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
              <Calendar className="w-4 h-4 text-slate-500" />
              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
              <span className="text-slate-400">-</span>
              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
           </div>
-
           <div className="flex gap-2 w-full md:w-auto">
              <button onClick={handleDownloadExcel} className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200" title="Excel"><FileDown className="w-5 h-5" /></button>
              <button onClick={handleDownloadStandardPDF} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="PDF Básico"><FileText className="w-5 h-5" /></button>
              <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"><RefreshCw className="w-5 h-5" /></button>
              <div className="h-8 w-px bg-slate-300 mx-1"></div>
-             <button 
-               onClick={handleEngineeringAccess} 
-               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAuthorized ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-             >
+             <button onClick={handleEngineeringAccess} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAuthorized ? 'bg-indigo-600 text-white shadow-md hover:bg-indigo-700' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
                {isAuthorized ? <BrainCircuit className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                {isAuthorized ? 'Ingeniería' : 'Acceso Ing.'}
              </button>
@@ -317,23 +276,45 @@ export const ManagerDashboard: React.FC = () => {
       {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* PANEL LATERAL: RANKING O TABLA DIARIA */}
+        {/* PANEL LATERAL: RANKING / EFICIENCIA */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
           {selectedOperator === 'all' ? (
-            // VISTA GLOBAL: MOSTRAR RANKING
+            // --- VISTA GLOBAL: RANKING CON FILTRO DE SECTOR ---
             <>
-              <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking del Período</h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-md font-bold text-slate-800 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
+                
+                {/* SELECTOR DE FILTRO PARA RANKING */}
+                <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
+                  <Filter className="w-3 h-3 text-slate-500"/>
+                  <select 
+                    value={rankingFilter} 
+                    onChange={(e) => setRankingFilter(e.target.value)} 
+                    className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                  >
+                    <option value="Global">Global</option>
+                    <option disabled>──────</option>
+                    {Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div className="overflow-y-auto flex-1 pr-2 space-y-3">
-                 {operatorStats.map((stat) => (
-                   <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                     <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
-                     <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
-                   </div>
-                 ))}
+                 {rankingStats.length > 0 ? (
+                   rankingStats.map((stat, idx) => (
+                     <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative overflow-hidden">
+                       {idx < 3 && <div className={`absolute top-0 right-0 p-1 px-2 text-[10px] font-bold text-white rounded-bl-lg ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-400')}`}>#{idx+1}</div>}
+                       <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
+                       <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+                     </div>
+                   ))
+                 ) : (
+                   <div className="text-center text-slate-400 py-10 italic">No hay datos en {rankingFilter}</div>
+                 )}
               </div>
             </>
           ) : (
-            // VISTA INDIVIDUAL: MOSTRAR TABLA DIARIA
+            // --- VISTA INDIVIDUAL: TABLA DIARIA ---
             <>
               <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Eficiencia Diaria</h3>
               <div className="overflow-y-auto flex-1">
@@ -359,7 +340,6 @@ export const ManagerDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* GRÁFICO DE TENDENCIA */}
         <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 lg:col-span-2`}>
           <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
           <ResponsiveContainer width="100%" height="100%">
@@ -404,7 +384,6 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* HISTORIAL DETALLADO */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
          <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
          <div className="overflow-x-auto max-h-96">
@@ -418,7 +397,6 @@ export const ManagerDashboard: React.FC = () => {
                     <th className="px-6 py-3">Modelo</th>
                     <th className="px-6 py-3 text-right">Cant</th>
                     <th className="px-6 py-3 text-right">Pts</th>
-                    {/* AGREGADO: Columna Visual de Observaciones */}
                     <th className="px-6 py-3 w-48">Obs.</th>
                   </tr>
                </thead>
@@ -432,11 +410,7 @@ export const ManagerDashboard: React.FC = () => {
                         <td className="px-6 py-4">{log.model} - {log.operation}</td>
                         <td className="px-6 py-4 text-right">{log.quantity}</td>
                         <td className="px-6 py-4 text-right font-bold text-blue-600">{log.totalPoints.toFixed(1)}</td>
-                        
-                        {/* CELDA VISUAL DE OBSERVACIONES */}
-                        <td className="px-6 py-4 text-xs text-slate-500 max-w-[150px] truncate" title={log.comments}>
-                          {log.comments || '-'}
-                        </td>
+                        <td className="px-6 py-4 text-xs text-slate-500 max-w-[150px] truncate" title={log.comments}>{log.comments || '-'}</td>
                      </tr>
                   ))}
                </tbody>
@@ -444,7 +418,6 @@ export const ManagerDashboard: React.FC = () => {
          </div>
       </div>
 
-      {/* MODAL 1: CONTRASEÑA */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -463,72 +436,48 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 2: MODO INGENIERÍA */}
       {showEngineeringModal && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in zoom-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
             <div className="bg-gradient-to-r from-indigo-900 to-slate-900 p-6 flex justify-between items-center text-white shrink-0">
               <div className="flex items-center gap-4">
                 <div className="bg-indigo-500/20 p-2 rounded-lg"><BrainCircuit className="w-8 h-8 text-indigo-400"/></div>
-                <div>
-                  <h3 className="text-2xl font-bold">Modo Ingeniería</h3>
-                  <p className="text-slate-400 text-sm flex items-center gap-2"><ShieldCheck className="w-3 h-3"/> Sesión Segura Activa</p>
-                </div>
+                <div><h3 className="text-2xl font-bold">Modo Ingeniería</h3><p className="text-slate-400 text-sm flex items-center gap-2"><ShieldCheck className="w-3 h-3"/> Sesión Segura Activa</p></div>
               </div>
               <button onClick={() => setShowEngineeringModal(false)} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><X className="w-6 h-6"/></button>
             </div>
-
             <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
                 <div className="lg:col-span-2 space-y-6">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
                     <h4 className="text-lg font-bold text-indigo-900 mb-4 border-b pb-2">Análisis de Inteligencia Artificial</h4>
                     {isAnalyzing ? (
-                      <div className="flex flex-col items-center justify-center py-12 text-slate-500">
-                        <Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" />
-                        <p className="animate-pulse">Generando reporte avanzado...</p>
-                      </div>
+                      <div className="flex flex-col items-center justify-center py-12 text-slate-500"><Loader2 className="w-12 h-12 animate-spin text-indigo-600 mb-4" /><p className="animate-pulse">Generando reporte avanzado...</p></div>
                     ) : (
                       <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">
-                        <div className="flex justify-between items-center mb-4">
-                           <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider">Reporte Automático</span>
-                           <button onClick={runAnalysis} className="text-xs text-slate-400 hover:text-indigo-600 flex items-center gap-1"><RefreshCw className="w-3 h-3"/> Regenerar</button>
-                        </div>
+                        <div className="flex justify-between items-center mb-4"><span className="text-xs font-bold text-indigo-500 uppercase tracking-wider">Reporte Automático</span><button onClick={runAnalysis} className="text-xs text-slate-400 hover:text-indigo-600 flex items-center gap-1"><RefreshCw className="w-3 h-3"/> Regenerar</button></div>
                         {analysisResult || "No hay datos suficientes para generar un análisis."}
                       </div>
                     )}
                   </div>
                 </div>
-
                 <div className="space-y-6">
                   <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h4 className="font-bold text-slate-800 mb-4">Exportación Avanzada</h4>
                     <p className="text-sm text-slate-500 mb-6">Genera un documento oficial incluyendo el análisis de IA, gráficos estadísticos y tablas de datos completos.</p>
-                    <button 
-                      onClick={handleFullReportPDF} 
-                      disabled={isGeneratingPDF}
-                      className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-[1.02] disabled:opacity-50"
-                    >
+                    <button onClick={handleFullReportPDF} disabled={isGeneratingPDF} className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-[1.02] disabled:opacity-50">
                       {isGeneratingPDF ? <Loader2 className="w-5 h-5 animate-spin"/> : <FileText className="w-5 h-5" />} 
                       {isGeneratingPDF ? 'GENERANDO...' : 'DESCARGAR REPORTE COMPLETO'}
                     </button>
                   </div>
-                  
                   <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
                     <h4 className="font-bold text-indigo-900 mb-2">Estado del Sistema</h4>
-                    <ul className="text-sm space-y-2 text-indigo-800">
-                      <li>• Motor de Análisis: <span className="font-bold text-green-600">Local v2.0</span></li>
-                      <li>• Registros Analizados: <span className="font-bold">{filteredLogs.length}</span></li>
-                      <li>• Filtro Actual: <span className="font-bold">{selectedOperator === 'all' ? 'Global' : selectedOperator}</span></li>
-                    </ul>
+                    <ul className="text-sm space-y-2 text-indigo-800"><li>• Motor de Análisis: <span className="font-bold text-green-600">Local v2.0</span></li><li>• Registros Analizados: <span className="font-bold">{filteredLogs.length}</span></li><li>• Filtro Actual: <span className="font-bold">{selectedOperator === 'all' ? 'Global' : selectedOperator}</span></li></ul>
                   </div>
                 </div>
               </div>
             </div>
-
-            <div className="bg-white border-t p-4 flex justify-end shrink-0">
-               <button onClick={() => setShowEngineeringModal(false)} className="text-slate-500 hover:text-slate-800 font-medium px-6">Volver al Dashboard</button>
-            </div>
+            <div className="bg-white border-t p-4 flex justify-end shrink-0"><button onClick={() => setShowEngineeringModal(false)} className="text-slate-500 hover:text-slate-800 font-medium px-6">Volver al Dashboard</button></div>
           </div>
         </div>
       )}
