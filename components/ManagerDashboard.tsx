@@ -132,16 +132,20 @@ export const ManagerDashboard: React.FC = () => {
     if (!analysisResult) runAnalysis();
   };
 
+  // En components/ManagerDashboard.tsx
+
   const runAnalysis = async () => {
     setIsAnalyzing(true);
     try {
-      const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator);
+      // CAMBIO AQUÍ: Agregamos 'dailyTarget' al final de los argumentos
+      const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator, dailyTarget);
       setAnalysisResult(result);
     } catch (e) {
       setAnalysisResult("Error al generar análisis.");
     } finally {
       setIsAnalyzing(false);
     }
+  
   };
 
   // --- CÁLCULOS PREVIOS (Necesarios para el PDF) ---
