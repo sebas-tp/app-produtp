@@ -11,10 +11,10 @@ import { Sector, PointRule, ProductionLog } from '../types';
 import { 
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
-  FileSearch, AlertOctagon, ArrowRight 
+  FileSearch, AlertOctagon, ArrowRight, Download, Shield 
 } from 'lucide-react';
 
-// --- COMPONENTE GESTOR DE LISTAS ---
+// --- COMPONENTE GESTOR DE LISTAS (Igual que antes) ---
 interface ListManagerProps {
   title: string;
   data: string[];
@@ -103,7 +103,7 @@ export const AdminPanel: React.FC = () => {
   const [operations, setOperations] = useState<string[]>([]);
   
   const [matrix, setMatrix] = useState<PointRule[]>([]);
-  const [logs, setLogs] = useState<ProductionLog[]>([]); 
+  const [logs, setLogs] = useState<ProductionLog[]>([]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
@@ -113,6 +113,7 @@ export const AdminPanel: React.FC = () => {
 
   const [jsonImport, setJsonImport] = useState('');
   const [importing, setImporting] = useState(false);
+  const [backingUp, setBackingUp] = useState(false); // Nuevo estado para el backup
 
   useEffect(() => { loadData(); }, []);
 
@@ -139,7 +140,6 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  // --- LÓGICA DE AUDITORÍA ---
   const auditData = React.useMemo(() => {
     const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
     const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
@@ -202,12 +202,57 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
   };
 
+  // --- NUEVA FUNCIÓN: BACKUP COMPLETO ---
+  const handleFullBackup = async () => {
+    setBackingUp(true);
+    try {
+      // 1. Recopilar TODOS los datos
+      const backupData = {
+        meta: {
+          date: new Date().toISOString(),
+          version: "2.0",
+          app: "TopSafe Production"
+        },
+        config: {
+          operators,
+          models,
+          operations
+        },
+        matrix: matrix,
+        logs: logs,
+        news: activeNews
+      };
+
+      // 2. Convertir a JSON
+      const jsonString = JSON.stringify(backupData, null, 2);
+      
+      // 3. Crear Blob y descargar
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `BACKUP_TOPSAFE_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } catch (e) {
+      console.error(e);
+      alert("Error al generar el respaldo.");
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
   const handleBulkImport = async () => {
     if (!jsonImport || !window.confirm("¿Importar datos?")) return;
     setImporting(true);
     try {
       const data = JSON.parse(jsonImport);
-      if (!Array.isArray(data)) throw new Error("Formato inválido");
+      // Validamos si es una importación simple o un backup complejo
+      // Por ahora mantenemos la importación simple de matriz para no complicar
+      if (!Array.isArray(data)) { alert("Por favor use el formato de lista [...] para importar matriz."); return; }
+      
       let added = 0;
       for (const item of data) {
         if (item.sector && item.model && item.operation) {
@@ -232,7 +277,7 @@ export const AdminPanel: React.FC = () => {
           <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
           <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz de Puntos</button>
           <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
-          <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Carga Masiva</button>
+          <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Datos & Backup</button>
         </div>
       </div>
 
@@ -246,7 +291,6 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'matrix' && (
         <div className="space-y-6">
-          {/* AUDITORÍA */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3">
                <div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div>
@@ -254,29 +298,19 @@ export const AdminPanel: React.FC = () => {
                  <h4 className="font-bold text-slate-800 text-sm">Productos sin Configurar</h4>
                  <p className="text-xs text-slate-500 mb-2">Modelos que no tienen ninguna regla de precio.</p>
                  <div className="text-2xl font-black text-slate-700">{auditData.modelsWithoutRules.length}</div>
-                 {auditData.modelsWithoutRules.length > 0 && (
-                   <div className="mt-2 text-xs text-slate-600 bg-slate-100 p-2 rounded max-h-24 overflow-y-auto">
-                     {auditData.modelsWithoutRules.join(', ')}
-                   </div>
-                 )}
+                 {auditData.modelsWithoutRules.length > 0 && <div className="mt-2 text-xs text-slate-600 bg-slate-100 p-2 rounded max-h-24 overflow-y-auto">{auditData.modelsWithoutRules.join(', ')}</div>}
                </div>
              </div>
              <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-start gap-3 shadow-sm">
                <div className="bg-red-100 p-2 rounded-full animate-pulse"><AlertOctagon className="w-5 h-5 text-red-600"/></div>
                <div className="flex-1">
                  <h4 className="font-bold text-red-800 text-sm">Alertas de Planta (Hechos Reales)</h4>
-                 <p className="text-xs text-red-600 mb-2">Operaciones que los empleados reportaron pero valen 0 puntos.</p>
-                 {auditData.missingRules.length === 0 ? (
-                   <div className="text-sm font-bold text-green-700 flex items-center gap-1"><Check className="w-4 h-4"/> ¡Todo en orden!</div>
-                 ) : (
+                 <p className="text-xs text-red-600 mb-2">Operaciones reportadas con 0 puntos.</p>
+                 {auditData.missingRules.length === 0 ? <div className="text-sm font-bold text-green-700 flex items-center gap-1"><Check className="w-4 h-4"/> ¡Todo en orden!</div> : (
                    <div className="space-y-2 mt-2 max-h-40 overflow-y-auto pr-1">
                      {auditData.missingRules.map((item, idx) => (
                        <div key={idx} className="bg-white p-2 rounded border border-red-100 flex justify-between items-center group">
-                         <div>
-                           <div className="text-xs font-bold text-slate-800">{item.model} - {item.operation}</div>
-                           <div className="text-[10px] text-slate-500">{item.sector} • Reportado {item.count} veces</div>
-                           <div className="text-[10px] text-red-400 truncate w-32">Por: {Array.from(item.operators).join(', ')}</div>
-                         </div>
+                         <div><div className="text-xs font-bold text-slate-800">{item.model} - {item.operation}</div><div className="text-[10px] text-slate-500">{item.sector} • {item.count} veces</div></div>
                          <button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700 flex items-center gap-1 shadow-sm">Solucionar <ArrowRight className="w-3 h-3"/></button>
                        </div>
                      ))}
@@ -286,13 +320,9 @@ export const AdminPanel: React.FC = () => {
              </div>
           </div>
 
-          {/* FORMULARIO */}
           <div className={`bg-white p-6 rounded-xl shadow-sm border ${editingId ? 'border-blue-500' : 'border-orange-100'} transition-colors`}>
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                {editingId ? <RefreshCw className="w-5 h-5 text-blue-600" /> : <Calculator className="w-5 h-5 text-orange-600" />}
-                {editingId ? 'Editando Regla' : 'Nueva Regla de Cálculo'}
-              </h3>
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">{editingId ? <RefreshCw className="w-5 h-5 text-blue-600" /> : <Calculator className="w-5 h-5 text-orange-600" />}{editingId ? 'Editando Regla' : 'Nueva Regla de Cálculo'}</h3>
               {editingId && <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">MODO EDICIÓN</span>}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
@@ -307,18 +337,12 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
           
-          {/* TABLA RESPONSIVA (Tarjetas en Mobile / Tabla en Desktop) */}
           <div className="grid grid-cols-1 gap-4 md:hidden">
             {matrix.map((rule) => (
               <div key={rule.id} className={`bg-white p-4 rounded-xl shadow-sm border-l-4 ${editingId === rule.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-orange-500'}`}>
                 <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <h4 className="font-bold text-slate-800">{rule.model}</h4>
-                    <span className="text-[10px] uppercase font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded">{rule.sector}</span>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-black text-orange-600">{rule.pointsPerUnit} <span className="text-xs font-normal text-slate-400">pts</span></div>
-                  </div>
+                  <div><h4 className="font-bold text-slate-800">{rule.model}</h4><span className="text-[10px] uppercase font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded">{rule.sector}</span></div>
+                  <div className="text-right"><div className="text-lg font-black text-orange-600">{rule.pointsPerUnit} <span className="text-xs font-normal text-slate-400">pts</span></div></div>
                 </div>
                 <p className="text-sm text-slate-600 mb-3 border-b border-slate-50 pb-2">{rule.operation}</p>
                 <div className="flex justify-end gap-3">
@@ -377,10 +401,21 @@ export const AdminPanel: React.FC = () => {
       )}
 
       {activeTab === 'import' && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
-          <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Database className="w-5 h-5 text-indigo-600"/> Importar JSON</h3>
-          <textarea className="w-full h-64 border p-4 rounded-lg font-mono text-xs bg-slate-50" value={jsonImport} onChange={(e) => setJsonImport(e.target.value)} />
-          <button onClick={handleBulkImport} disabled={importing || !jsonImport} className="mt-4 bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 w-full">{importing ? <Loader2 className="animate-spin w-5 h-5 mx-auto"/> : 'IMPORTAR'}</button>
+        <div className="grid grid-cols-1 gap-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-emerald-600"/> Respaldo de Seguridad</h3>
+            <p className="text-sm text-slate-600 mb-4">Descargue una copia completa de toda la base de datos (Registros, Configuración, Matriz y Noticias). Guarde este archivo en un lugar seguro (Drive/PC) semanalmente.</p>
+            <button onClick={handleFullBackup} disabled={backingUp} className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-lg transition-colors shadow-lg shadow-emerald-100 disabled:opacity-50">
+              {backingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+              {backingUp ? 'GENERANDO ARCHIVO...' : 'DESCARGAR BACKUP COMPLETO (.JSON)'}
+            </button>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100 opacity-75 hover:opacity-100 transition-opacity">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Database className="w-5 h-5 text-indigo-600"/> Importar Matriz (Avanzado)</h3>
+            <textarea className="w-full h-32 border p-4 rounded-lg font-mono text-xs bg-slate-50" value={jsonImport} onChange={(e) => setJsonImport(e.target.value)} placeholder='[ {"sector": "Corte", "model": "10404", "operation": "Corte", "pointsPerUnit": 72.12}, ... ]' />
+            <button onClick={handleBulkImport} disabled={importing || !jsonImport} className="mt-4 bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-indigo-700 w-full">{importing ? <Loader2 className="animate-spin w-5 h-5 mx-auto"/> : 'IMPORTAR MATRIZ'}</button>
+          </div>
         </div>
       )}
     </div>
