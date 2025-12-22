@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
-  query, orderBy, setDoc, where, writeBatch 
+  query, orderBy, setDoc, where, writeBatch, limit // <--- 1. AGREGADO "limit"
 } from 'firebase/firestore';
 import { ProductionLog, Sector, PointRule, NewsItem } from '../types';
 import jsPDF from 'jspdf';
@@ -42,7 +42,13 @@ const DEFAULT_TARGET = 24960;
 
 export const getLogs = async (): Promise<ProductionLog[]> => {
   try {
-    const q = query(collection(db, LOGS_COL), orderBy('timestamp', 'desc'));
+    // 2. OPTIMIZACIÓN: Solo traemos los últimos 800 registros
+    const q = query(
+      collection(db, LOGS_COL), 
+      orderBy('timestamp', 'desc'), 
+      limit(800) // <--- ESTO PROTEGE TU CUOTA GRATUITA
+    );
+    
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => {
       const data = doc.data();
@@ -306,11 +312,6 @@ export const restoreSystemFromBackup = async (backupData: any) => {
   try {
     const batch = writeBatch(db);
     
-    // NOTA: writeBatch tiene límite de 500 operaciones.
-    // Para simplificar, aquí hacemos escrituras directas si son muchas,
-    // o usamos el batch si son pocas. En un sistema real masivo se usan batches paginados.
-    // Aquí usaremos una estrategia híbrida segura: Promesas paralelas.
-
     // 1. Restaurar Configuración (Listas)
     if (backupData.config) {
       if (backupData.config.operators) await saveOperators(backupData.config.operators);
@@ -338,14 +339,12 @@ export const restoreSystemFromBackup = async (backupData: any) => {
 
     // 4. Restaurar LOGS (Producción)
     if (backupData.logs && Array.isArray(backupData.logs)) {
-      // Bloques de 50 para no saturar
       const chunkSize = 50;
       for (let i = 0; i < backupData.logs.length; i += chunkSize) {
         const chunk = backupData.logs.slice(i, i + chunkSize);
         await Promise.all(chunk.map(async (log: any) => {
           const ref = log.id ? doc(db, 'production_logs', log.id) : doc(collection(db, 'production_logs'));
           const { id, ...data } = log;
-          // Normalización de datos antiguos por si acaso
           const cleanData = {
             ...data,
             operator: data.operatorName || data.operator,
