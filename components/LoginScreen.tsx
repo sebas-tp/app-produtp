@@ -43,7 +43,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     // Simulación de carga para que parezca profesional
     setTimeout(() => {
       // CONTRASEÑA MAESTRA LOCAL (Sin internet)
-      if (password === "admin") {
+      if (password === "admin.987") {
         onLogin({ name: 'Gerente Planta', role: 'admin' });
       } else {
         setError('Contraseña incorrecta');
