@@ -44,7 +44,7 @@ export const ManagerDashboard: React.FC = () => {
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   // CLAVE LOCAL (Cambia "admin" por lo que quieras si necesitas)
-  const MASTER_PASSWORD = "admin";
+  const MASTER_PASSWORD = "ing22";
 
   useEffect(() => {
     const init = async () => {
