@@ -29,6 +29,8 @@ export const ManagerDashboard: React.FC = () => {
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedOperator, setSelectedOperator] = useState<string>('all');
+  
+  // NUEVO: Filtro independiente para el ranking
   const [rankingFilter, setRankingFilter] = useState<string>('Global');
 
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
@@ -43,8 +45,7 @@ export const ManagerDashboard: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  // CLAVE LOCAL (Cambia "admin" por lo que quieras si necesitas)
-  const MASTER_PASSWORD = "ing22";
+  const MASTER_PASSWORD = "admin";
 
   useEffect(() => {
     const init = async () => {
@@ -100,32 +101,22 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  const handleDownloadExcel = () => {
-    const filename = `Reporte_${selectedOperator === 'all' ? 'Global' : selectedOperator}_${startDate}_al_${endDate}`;
-    downloadCSV(filteredLogs, filename);
-  };
-
-  const handleDownloadStandardPDF = () => {
-    const title = `Reporte: ${startDate} al ${endDate} (${selectedOperator === 'all' ? 'Global' : selectedOperator})`;
-    const filename = `Reporte_${startDate}_al_${endDate}`;
-    downloadPDF(filteredLogs, title, filename);
-  };
+  const handleDownloadExcel = () => downloadCSV(filteredLogs, `Reporte_${startDate}_${endDate}`);
+  const handleDownloadStandardPDF = () => downloadPDF(filteredLogs, `Reporte ${startDate} al ${endDate}`, `Reporte_${startDate}`);
 
   const handleEngineeringAccess = () => {
     if (isAuthorized) openEngineeringModal();
     else setShowAuthModal(true);
   };
 
-  // --- AUTENTICACIÓN LOCAL (CORREGIDA) ---
   const verifyPassword = (e: React.FormEvent) => {
     e.preventDefault();
     if (passwordInput === MASTER_PASSWORD) {
       setIsAuthorized(true);
       setShowAuthModal(false);
-      setPasswordInput('');
       openEngineeringModal();
     } else {
-      alert("Acceso denegado. Verifique la contraseña.");
+      alert("Acceso denegado.");
     }
   };
 
@@ -137,7 +128,7 @@ export const ManagerDashboard: React.FC = () => {
   const runAnalysis = async () => {
     setIsAnalyzing(true);
     try {
-      const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator, dailyTarget);
+      const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator);
       setAnalysisResult(result);
     } catch (e) {
       setAnalysisResult("Error al generar análisis.");
@@ -146,143 +137,53 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  // --- GENERACIÓN DE PDF ---
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    
-    // PORTADA
-    doc.setFontSize(22);
-    doc.setTextColor(30, 41, 59);
-    doc.text(`Informe Técnico de Producción`, 14, 20);
-    
+    doc.setFontSize(18);
+    doc.text(`Reporte de Ingeniería TopSafe`, 14, 20);
     doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Empresa: TopSafe S.A. | Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 28);
-    doc.text(`Período Analizado: ${startDate} al ${endDate}`, 14, 34);
-    doc.text(`Alcance: ${selectedOperator === 'all' ? 'Planta Completa' : 'Operario: ' + selectedOperator}`, 14, 40);
+    doc.text(`Generado: ${new Date().toLocaleDateString()}`, 14, 26);
+    let startY = 40;
 
-    let currentY = 50;
-
-    // SECCIÓN 1: ANÁLISIS IA
     if (analysisResult) {
-      doc.setDrawColor(200);
-      doc.line(14, 45, pageWidth - 14, 45);
-      
-      doc.setFontSize(14);
-      doc.setTextColor(79, 70, 229); 
-      doc.text("1. Diagnóstico Inteligente", 14, currentY);
-      currentY += 8;
-
-      doc.setFontSize(10);
-      doc.setTextColor(0);
-      const cleanText = analysisResult.replace(/\*\*/g, '').replace(/###/g, '').replace(/•/g, '-');
-      const splitText = doc.splitTextToSize(cleanText, 180);
-      doc.text(splitText, 14, currentY);
-      currentY += (splitText.length * 5) + 10;
+      doc.setFontSize(12); doc.setTextColor(234, 88, 12); doc.text("Análisis Inteligente", 14, startY);
+      doc.setFontSize(10); doc.setTextColor(0);
+      const splitText = doc.splitTextToSize(analysisResult.replace(/\*/g, ''), 180);
+      doc.text(splitText, 14, startY + 8);
+      startY += 10 + (splitText.length * 5); 
     }
 
-    // SECCIÓN 2: GRÁFICOS
     try {
-      doc.addPage();
-      doc.setFontSize(14);
-      doc.setTextColor(79, 70, 229);
-      doc.text("2. Métricas Visuales", 14, 20);
-      let chartY = 30;
-
       await new Promise(r => setTimeout(r, 500)); 
-
       const chartTrend = document.getElementById('chart-trend');
       if (chartTrend) {
-        doc.setFontSize(11);
-        doc.setTextColor(50);
-        doc.text("Evolución Diaria de Producción", 14, chartY);
+        doc.addPage();
         const canvas1 = await html2canvas(chartTrend, { scale: 2, backgroundColor: '#ffffff' });
-        doc.addImage(canvas1.toDataURL('image/png'), 'PNG', 14, chartY + 5, 180, 70);
-        chartY += 85;
+        doc.addImage(canvas1.toDataURL('image/png'), 'PNG', 14, 30, 180, 80); 
       }
+    } catch (e) { console.error(e); }
 
-      const chartSector = document.getElementById('chart-sector');
-      if (chartSector) {
-        doc.text("Distribución por Sector", 14, chartY);
-        const canvas2 = await html2canvas(chartSector, { scale: 2, backgroundColor: '#ffffff' });
-        doc.addImage(canvas2.toDataURL('image/png'), 'PNG', 14, chartY + 5, 180, 70);
-        chartY += 85;
-      }
-
-      const chartModels = document.getElementById('chart-models');
-      if (chartModels) {
-        if (chartY > 200) { doc.addPage(); chartY = 20; }
-        doc.text("Top 5 Modelos Fabricados", 14, chartY);
-        const canvas3 = await html2canvas(chartModels, { scale: 2, backgroundColor: '#ffffff' });
-        doc.addImage(canvas3.toDataURL('image/png'), 'PNG', 14, chartY + 5, 180, 70);
-      }
-
-    } catch (e) { console.error("Error capturando gráficos:", e); }
-
-    // SECCIÓN 3: TABLA DE EFICIENCIA
     doc.addPage();
-    doc.setFontSize(14);
-    doc.setTextColor(79, 70, 229);
-    doc.text("3. Resumen de Eficiencia Diaria", 14, 20);
-
-    const efficiencyRows = dailyTrend.map(day => {
-      const percentage = (day.points / dailyTarget) * 100;
-      return [
-        new Date(day.fullDate).toLocaleDateString(), 
-        day.points.toLocaleString('es-AR'),          
-        dailyTarget.toLocaleString('es-AR'),         
-        percentage.toFixed(1) + '%'                  
-      ];
-    });
-
     autoTable(doc, {
       startY: 25,
-      head: [['Fecha', 'Puntos Realizados', 'Meta Estándar', '% Eficiencia']],
-      body: efficiencyRows,
-      theme: 'grid',
-      headStyles: { fillColor: [50, 50, 50] },
-      styles: { halign: 'center' },
-      columnStyles: { 0: { halign: 'left' }, 3: { fontStyle: 'bold' } }
-    });
-
-    // SECCIÓN 4: REGISTRO DETALLADO
-    doc.setFontSize(14);
-    doc.setTextColor(79, 70, 229);
-    const finalY = (doc as any).lastAutoTable.finalY || 25;
-    
-    if (finalY > 250) {
-       doc.addPage();
-       doc.text("4. Registro Detallado de Operaciones", 14, 20);
-    } else {
-       doc.text("4. Registro Detallado de Operaciones", 14, finalY + 15);
-    }
-
-    autoTable(doc, {
-      startY: finalY > 250 ? 25 : finalY + 20,
       head: [['Fecha', 'Orden', 'Operario', 'Sector', 'Modelo', 'Pts', 'Obs.']],
       body: filteredLogs.map(l => [
-        new Date(l.timestamp).toLocaleDateString(),
-        l.orderNumber || '-', 
-        l.operatorName,
-        l.sector,
-        l.model,
-        l.totalPoints.toFixed(1),
-        l.comments ? l.comments.substring(0, 25) + '...' : '-'
+        new Date(l.timestamp).toLocaleDateString(), l.orderNumber || '-', l.operatorName, l.sector, l.model, l.totalPoints.toFixed(1), l.comments ? l.comments.substring(0, 20) + '...' : '-'
       ]),
-      theme: 'grid',
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [79, 70, 229] }
+      theme: 'grid', styles: { fontSize: 8 }
     });
-
-    doc.save(`Reporte_Ingenieria_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Reporte_Ingenieria.pdf`);
     setIsGeneratingPDF(false);
   };
 
-  // --- CÁLCULOS DE VISUALIZACIÓN ---
+  // --- CÁLCULOS ---
+
+  // 1. Ranking Inteligente (Filtrable por Sector)
   const rankingStats = Object.values(
+    // Usamos 'filteredLogs' (que ya tiene filtro de fecha)
     filteredLogs
+      // Aplicamos el filtro de sector SOLO para el ranking
       .filter(log => rankingFilter === 'Global' || log.sector === rankingFilter)
       .reduce((acc, log) => {
         if (!acc[log.operatorName]) {
@@ -316,8 +217,7 @@ export const ManagerDashboard: React.FC = () => {
     if (!acc[log.model]) acc[log.model] = { name: log.model, value: 0 };
     acc[log.model].value += log.quantity;
     return acc;
-  }, {} as Record<string, { name: string; value: number }>))
-  .sort((a, b) => b.value - a.value).slice(0, 5);
+  }, {} as Record<string, { name: string; value: number }>)).sort((a, b) => b.value - a.value).slice(0, 5);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
 
@@ -325,7 +225,7 @@ export const ManagerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-8 p-4 md:p-8">
-      {/* HEADER */}
+      {/* HEADER PRINCIPAL */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
@@ -376,37 +276,52 @@ export const ManagerDashboard: React.FC = () => {
       {/* GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* PANEL RANKING / EFICIENCIA */}
+        {/* PANEL LATERAL: RANKING / EFICIENCIA */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
           {selectedOperator === 'all' ? (
+            // --- VISTA GLOBAL: RANKING CON FILTRO DE SECTOR ---
             <>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-md font-bold text-slate-800 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
+                
+                {/* SELECTOR DE FILTRO PARA RANKING */}
                 <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
                   <Filter className="w-3 h-3 text-slate-500"/>
-                  <select value={rankingFilter} onChange={(e) => setRankingFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                  <select 
+                    value={rankingFilter} 
+                    onChange={(e) => setRankingFilter(e.target.value)} 
+                    className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                  >
                     <option value="Global">Global</option>
                     <option disabled>──────</option>
                     {Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </div>
+
               <div className="overflow-y-auto flex-1 pr-2 space-y-3">
-                 {rankingStats.length > 0 ? rankingStats.map((stat, idx) => (
-                   <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative overflow-hidden">
-                     {idx < 3 && <div className={`absolute top-0 right-0 p-1 px-2 text-[10px] font-bold text-white rounded-bl-lg ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-400')}`}>#{idx+1}</div>}
-                     <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
-                     <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
-                   </div>
-                 )) : <div className="text-center text-slate-400 py-10 italic">No hay datos en {rankingFilter}</div>}
+                 {rankingStats.length > 0 ? (
+                   rankingStats.map((stat, idx) => (
+                     <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative overflow-hidden">
+                       {idx < 3 && <div className={`absolute top-0 right-0 p-1 px-2 text-[10px] font-bold text-white rounded-bl-lg ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-400')}`}>#{idx+1}</div>}
+                       <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
+                       <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+                     </div>
+                   ))
+                 ) : (
+                   <div className="text-center text-slate-400 py-10 italic">No hay datos en {rankingFilter}</div>
+                 )}
               </div>
             </>
           ) : (
+            // --- VISTA INDIVIDUAL: TABLA DIARIA ---
             <>
               <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Eficiencia Diaria</h3>
               <div className="overflow-y-auto flex-1">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-500 uppercase"><tr><th className="p-2 text-left">Fecha</th><th className="p-2 text-right">Pts</th><th className="p-2 text-right">%</th></tr></thead>
+                  <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                    <tr><th className="p-2 text-left">Fecha</th><th className="p-2 text-right">Pts</th><th className="p-2 text-right">%</th></tr>
+                  </thead>
                   <tbody>
                     {dailyTrend.map((day) => {
                       const eff = (day.points / dailyTarget) * 100;
@@ -425,11 +340,18 @@ export const ManagerDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* GRAFICO TENDENCIA */}
         <div id="chart-trend" className={`bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 lg:col-span-2`}>
           <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={dailyTrend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{fontSize: 12}} /><YAxis /><Tooltip /><Legend /><Line type="monotone" dataKey="points" name="Puntos" stroke="#2563eb" strokeWidth={3} dot={{r: 4}} /><Line type="monotone" dataKey="quantity" name="Unidades" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" /></LineChart>
+            <LineChart data={dailyTrend}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="name" tick={{fontSize: 12}} />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Line type="monotone" dataKey="points" name="Puntos" stroke="#2563eb" strokeWidth={3} dot={{r: 4}} />
+              <Line type="monotone" dataKey="quantity" name="Unidades" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" />
+            </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
@@ -437,22 +359,46 @@ export const ManagerDashboard: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6">
         <div id="chart-sector" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
           <h3 className="text-md font-bold text-slate-700 mb-4">Producción por Sector</h3>
-          <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={countBySector} cx="50%" cy="50%" innerRadius={60} outerRadius={80} fill="#8884d8" paddingAngle={5} dataKey="value">{countBySector.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={countBySector} cx="50%" cy="50%" innerRadius={60} outerRadius={80} fill="#8884d8" paddingAngle={5} dataKey="value">
+                {countBySector.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+              </Pie>
+              <Tooltip />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
 
-        <div id="chart-models" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
           <h3 className="text-md font-semibold text-slate-700 mb-4">Top 5 Modelos</h3>
-          <ResponsiveContainer width="100%" height="100%"><BarChart data={modelStats} layout="vertical"><CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false}/><XAxis type="number" hide /><YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} /><Tooltip /><Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} name="Unidades" /></BarChart></ResponsiveContainer>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={modelStats} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false}/>
+              <XAxis type="number" hide />
+              <YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} />
+              <Tooltip />
+              <Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} name="Unidades" />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
-      {/* HISTORIAL DETALLADO */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
          <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
          <div className="overflow-x-auto max-h-96">
             <table className="w-full text-sm text-left text-slate-600">
                <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
-                  <tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Orden</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Sector</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Cant</th><th className="px-6 py-3 text-right">Pts</th><th className="px-6 py-3 w-48">Obs.</th></tr>
+                  <tr>
+                    <th className="px-6 py-3">Fecha</th>
+                    <th className="px-6 py-3">Orden</th>
+                    <th className="px-6 py-3">Operario</th>
+                    <th className="px-6 py-3">Sector</th>
+                    <th className="px-6 py-3">Modelo</th>
+                    <th className="px-6 py-3 text-right">Cant</th>
+                    <th className="px-6 py-3 text-right">Pts</th>
+                    <th className="px-6 py-3 w-48">Obs.</th>
+                  </tr>
                </thead>
                <tbody>
                   {filteredLogs.slice(0, 100).map(log => (
@@ -475,10 +421,16 @@ export const ManagerDashboard: React.FC = () => {
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
-            <div className="bg-slate-900 p-6 text-white text-center"><Lock className="w-10 h-10 mx-auto mb-2 text-orange-500" /><h3 className="text-lg font-bold">Acceso Ingeniería</h3></div>
+            <div className="bg-slate-900 p-6 text-white text-center">
+              <Lock className="w-10 h-10 mx-auto mb-2 text-orange-500" />
+              <h3 className="text-lg font-bold">Acceso Ingeniería</h3>
+            </div>
             <form onSubmit={verifyPassword} className="p-6">
               <input type="password" autoFocus className="w-full border rounded-lg p-3 outline-none mb-4 text-center tracking-widest font-mono text-xl" placeholder="••••••" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} />
-              <div className="flex gap-2"><button type="button" onClick={() => setShowAuthModal(false)} className="flex-1 bg-slate-100 py-3 rounded-lg font-bold">Cancelar</button><button type="submit" className="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700">Entrar</button></div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowAuthModal(false)} className="flex-1 bg-slate-100 py-3 rounded-lg font-bold">Cancelar</button>
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700">Entrar</button>
+              </div>
             </form>
           </div>
         </div>
@@ -488,7 +440,10 @@ export const ManagerDashboard: React.FC = () => {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in zoom-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
             <div className="bg-gradient-to-r from-indigo-900 to-slate-900 p-6 flex justify-between items-center text-white shrink-0">
-              <div className="flex items-center gap-4"><div className="bg-indigo-500/20 p-2 rounded-lg"><BrainCircuit className="w-8 h-8 text-indigo-400"/></div><div><h3 className="text-2xl font-bold">Modo Ingeniería</h3><p className="text-slate-400 text-sm flex items-center gap-2"><ShieldCheck className="w-3 h-3"/> Sesión Segura Activa</p></div></div>
+              <div className="flex items-center gap-4">
+                <div className="bg-indigo-500/20 p-2 rounded-lg"><BrainCircuit className="w-8 h-8 text-indigo-400"/></div>
+                <div><h3 className="text-2xl font-bold">Modo Ingeniería</h3><p className="text-slate-400 text-sm flex items-center gap-2"><ShieldCheck className="w-3 h-3"/> Sesión Segura Activa</p></div>
+              </div>
               <button onClick={() => setShowEngineeringModal(false)} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors"><X className="w-6 h-6"/></button>
             </div>
             <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
@@ -511,7 +466,8 @@ export const ManagerDashboard: React.FC = () => {
                     <h4 className="font-bold text-slate-800 mb-4">Exportación Avanzada</h4>
                     <p className="text-sm text-slate-500 mb-6">Genera un documento oficial incluyendo el análisis de IA, gráficos estadísticos y tablas de datos completos.</p>
                     <button onClick={handleFullReportPDF} disabled={isGeneratingPDF} className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-[1.02] disabled:opacity-50">
-                      {isGeneratingPDF ? <Loader2 className="w-5 h-5 animate-spin"/> : <FileText className="w-5 h-5" />} {isGeneratingPDF ? 'GENERANDO...' : 'DESCARGAR REPORTE COMPLETO'}
+                      {isGeneratingPDF ? <Loader2 className="w-5 h-5 animate-spin"/> : <FileText className="w-5 h-5" />} 
+                      {isGeneratingPDF ? 'GENERANDO...' : 'DESCARGAR REPORTE COMPLETO'}
                     </button>
                   </div>
                   <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
