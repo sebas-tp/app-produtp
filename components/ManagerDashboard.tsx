@@ -43,7 +43,7 @@ export const ManagerDashboard: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  const MASTER_PASSWORD = "admin";
+  const MASTER_PASSWORD = "admin123";
 
   useEffect(() => {
     const init = async () => {
