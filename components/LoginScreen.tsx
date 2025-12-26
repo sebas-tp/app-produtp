@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { getOperators } from '../services/dataService';
+// 1. Importamos las funciones de autenticación de Firebase
+import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { ShieldCheck, HardHat, ArrowRight, Lock, Loader2 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -12,7 +14,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [selectedOperator, setSelectedOperator] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-    
+   
   // Async State
   const [operators, setOperators] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,28 +32,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const handleOperatorLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedOperator) {
+      // El operario entra sin auth de Firebase (Público restringido por reglas)
       onLogin({ name: selectedOperator, role: 'operator' });
     }
   };
 
-  // --- AQUÍ ESTABA EL ERROR, LO HEMOS CORREGIDO A MODO LOCAL ---
-  const handleAdminLogin = (e: React.FormEvent) => {
+  // 2. Modificamos esta función para usar Firebase real
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
+    setLoading(true); // Reutilizamos el estado de loading para el feedback visual
 
-    // Simulación de carga para que parezca profesional
-    setTimeout(() => {
-      // CONTRASEÑA MAESTRA LOCAL (Sin internet)
-      if (password === "admin.987") {
-        onLogin({ name: 'Gerente Planta', role: 'admin' });
-      } else {
-        setError('Contraseña incorrecta');
-        setLoading(false);
-      }
-    }, 800); 
+    const auth = getAuth();
+    // TRUCO: Email fijo oculto. El usuario solo escribe la password.
+    // ASEGÚRATE de crear este usuario en Firebase Console primero.
+    const emailOculto = "admin@topsafe.com"; 
+
+    try {
+      await signInWithEmailAndPassword(auth, emailOculto, password);
+      // Si no da error, el login fue exitoso
+      onLogin({ name: 'Gerente Planta', role: 'admin' });
+    } catch (err) {
+      console.error(err);
+      setError('Contraseña incorrecta o error de conexión');
+    } finally {
+      setLoading(false);
+    }
   };
-  // ------------------------------------------------------------
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 relative">
@@ -63,7 +70,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           <h1 className="text-3xl font-black tracking-tight mb-2 text-white uppercase italic">
             Producción <span className="text-amber-500">TopSafe</span>
           </h1>
-          <p className="text-slate-400 text-sm font-medium">App Producción</p>
+          <p className="text-slate-400 text-sm font-medium">App Producción </p>
         </div>
 
         <div className="p-8">
@@ -161,6 +168,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 {error && <p className="text-red-500 text-xs mt-2 font-bold">{error}</p>}
               </div>
 
+              {/* Agregué estado de loading al botón también */}
               <button 
                 disabled={loading}
                 className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 rounded-lg transition-colors shadow-md shadow-orange-200 flex justify-center items-center disabled:opacity-70"
