@@ -43,7 +43,8 @@ export const ManagerDashboard: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  const MASTER_PASSWORD = "admin123";
+  // CLAVE LOCAL (Cambia "admin" por lo que quieras si necesitas)
+  const MASTER_PASSWORD = "admin";
 
   useEffect(() => {
     const init = async () => {
@@ -115,6 +116,7 @@ export const ManagerDashboard: React.FC = () => {
     else setShowAuthModal(true);
   };
 
+  // --- AUTENTICACIÓN LOCAL (CORREGIDA) ---
   const verifyPassword = (e: React.FormEvent) => {
     e.preventDefault();
     if (passwordInput === MASTER_PASSWORD) {
@@ -123,7 +125,7 @@ export const ManagerDashboard: React.FC = () => {
       setPasswordInput('');
       openEngineeringModal();
     } else {
-      alert("Acceso denegado.");
+      alert("Acceso denegado. Verifique la contraseña.");
     }
   };
 
@@ -132,12 +134,9 @@ export const ManagerDashboard: React.FC = () => {
     if (!analysisResult) runAnalysis();
   };
 
-  // En components/ManagerDashboard.tsx
-
   const runAnalysis = async () => {
     setIsAnalyzing(true);
     try {
-      // CAMBIO AQUÍ: Agregamos 'dailyTarget' al final de los argumentos
       const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator, dailyTarget);
       setAnalysisResult(result);
     } catch (e) {
@@ -145,27 +144,15 @@ export const ManagerDashboard: React.FC = () => {
     } finally {
       setIsAnalyzing(false);
     }
-  
   };
 
-  // --- CÁLCULOS PREVIOS (Necesarios para el PDF) ---
-  const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
-    const date = log.timestamp.split('T')[0]; 
-    const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
-    if (!acc[date]) acc[date] = { fullDate: date, name: shortDate, points: 0, quantity: 0 };
-    acc[date].points += log.totalPoints;
-    acc[date].quantity += log.quantity;
-    return acc;
-  }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
-  .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
-
-  // --- FUNCIÓN DE EXPORTACIÓN PDF ---
+  // --- GENERACIÓN DE PDF ---
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     
-    // 1. PORTADA
+    // PORTADA
     doc.setFontSize(22);
     doc.setTextColor(30, 41, 59);
     doc.text(`Informe Técnico de Producción`, 14, 20);
@@ -184,7 +171,7 @@ export const ManagerDashboard: React.FC = () => {
       doc.line(14, 45, pageWidth - 14, 45);
       
       doc.setFontSize(14);
-      doc.setTextColor(79, 70, 229); // Indigo
+      doc.setTextColor(79, 70, 229); 
       doc.text("1. Diagnóstico Inteligente", 14, currentY);
       currentY += 8;
 
@@ -234,7 +221,7 @@ export const ManagerDashboard: React.FC = () => {
 
     } catch (e) { console.error("Error capturando gráficos:", e); }
 
-    // SECCIÓN 3: TABLA DE EFICIENCIA DIARIA (NUEVO)
+    // SECCIÓN 3: TABLA DE EFICIENCIA
     doc.addPage();
     doc.setFontSize(14);
     doc.setTextColor(79, 70, 229);
@@ -243,10 +230,10 @@ export const ManagerDashboard: React.FC = () => {
     const efficiencyRows = dailyTrend.map(day => {
       const percentage = (day.points / dailyTarget) * 100;
       return [
-        new Date(day.fullDate).toLocaleDateString(), // Fecha completa
-        day.points.toLocaleString('es-AR'),          // Puntos con miles
-        dailyTarget.toLocaleString('es-AR'),         // Meta
-        percentage.toFixed(1) + '%'                  // Porcentaje
+        new Date(day.fullDate).toLocaleDateString(), 
+        day.points.toLocaleString('es-AR'),          
+        dailyTarget.toLocaleString('es-AR'),         
+        percentage.toFixed(1) + '%'                  
       ];
     });
 
@@ -257,19 +244,14 @@ export const ManagerDashboard: React.FC = () => {
       theme: 'grid',
       headStyles: { fillColor: [50, 50, 50] },
       styles: { halign: 'center' },
-      columnStyles: { 
-        0: { halign: 'left' },
-        3: { fontStyle: 'bold' } 
-      }
+      columnStyles: { 0: { halign: 'left' }, 3: { fontStyle: 'bold' } }
     });
 
     // SECCIÓN 4: REGISTRO DETALLADO
     doc.setFontSize(14);
     doc.setTextColor(79, 70, 229);
-    // Usamos finalY de la tabla anterior para saber donde escribir, o agregamos pagina si falta espacio
     const finalY = (doc as any).lastAutoTable.finalY || 25;
     
-    // Si queda poco espacio, saltamos pagina
     if (finalY > 250) {
        doc.addPage();
        doc.text("4. Registro Detallado de Operaciones", 14, 20);
@@ -298,7 +280,7 @@ export const ManagerDashboard: React.FC = () => {
     setIsGeneratingPDF(false);
   };
 
-  // --- MÁS CÁLCULOS ---
+  // --- CÁLCULOS DE VISUALIZACIÓN ---
   const rankingStats = Object.values(
     filteredLogs
       .filter(log => rankingFilter === 'Global' || log.sector === rankingFilter)
@@ -319,6 +301,16 @@ export const ManagerDashboard: React.FC = () => {
     acc[log.sector].value += log.quantity;
     return acc;
   }, {} as Record<string, { name: string; value: number }>));
+
+  const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
+    const date = log.timestamp.split('T')[0]; 
+    const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
+    if (!acc[date]) acc[date] = { fullDate: date, name: shortDate, points: 0, quantity: 0 };
+    acc[date].points += log.totalPoints;
+    acc[date].quantity += log.quantity;
+    return acc;
+  }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
+  .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
 
   const modelStats = Object.values(filteredLogs.reduce((acc, log) => {
     if (!acc[log.model]) acc[log.model] = { name: log.model, value: 0 };
