@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon
+  Timer, Layers, LayoutList, Scale, AlertOctagon, TrendingDown
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -178,6 +178,16 @@ export const ManagerDashboard: React.FC = () => {
     }).sort((a, b) => b.declaredPoints - a.declaredPoints);
   };
 
+  // --- NUEVA LÓGICA: PUNTOS REALES (TANGO) PARA LA CARD DEL DASHBOARD ---
+  const calculateTotalTangoPoints = () => {
+    const audit = getAuditData();
+    return audit.reduce((sum, item) => sum + item.theoreticalPoints, 0);
+  };
+
+  const totalDeclaredPoints = filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0);
+  const totalTangoPoints = calculateTotalTangoPoints();
+  const globalDifference = totalDeclaredPoints - totalTangoPoints;
+
   // --- HANDLERS Y EXPORTACIONES ---
   const handleSaveTarget = async () => {
     const newVal = parseInt(tempTarget);
@@ -194,7 +204,7 @@ export const ManagerDashboard: React.FC = () => {
   
   const runAnalysis = async () => { setIsAnalyzing(true); try { const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator, dailyTarget); setAnalysisResult(result); } catch (e) { setAnalysisResult("Error al generar análisis."); } finally { setIsAnalyzing(false); }};
 
-  // --- 1. EXPORTADOR GENÉRICO DE CSV (Corrección Issue Excel) ---
+  // --- 1. EXPORTADOR GENÉRICO DE CSV ---
   const generateGenericCSV = (headers: string[], rows: (string | number)[][], filename: string) => {
     const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -207,7 +217,7 @@ export const ManagerDashboard: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // --- 2. EXCEL INTELIGENTE (Depende de la pestaña) ---
+  // --- 2. EXCEL INTELIGENTE ---
   const handleSmartExcel = () => {
     if (activeTab === 'metrics') {
         downloadCSV(filteredLogs, `Reporte_Metricas_${startDate}`);
@@ -232,7 +242,7 @@ export const ManagerDashboard: React.FC = () => {
     }
   };
 
-  // --- 3. PDF INTELIGENTE (Con columnas faltantes corregidas) ---
+  // --- 3. PDF INTELIGENTE ---
   const handleSmartPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
@@ -288,7 +298,7 @@ export const ManagerDashboard: React.FC = () => {
                 l.totalPoints.toFixed(1),
                 l.comments || '-'
             ]),
-            columnStyles: { 5: { cellWidth: 50 } } // Hacemos la columna de comentarios más ancha
+            columnStyles: { 5: { cellWidth: 50 } }
         });
     }
 
@@ -357,10 +367,13 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* PESTAÑA 1: MÉTRICAS ORIGINALES */}
+      {/* PESTAÑA 1: MÉTRICAS (Con las nuevas tarjetas de comparación) */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
+            {/* KPI CARDS REDISEÑADAS PARA TANGO */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                
+                {/* 1. META DIARIA (Sin cambios) */}
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
                         <p className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Target className="w-4 h-4 text-amber-500" /> Meta Diaria</p>
@@ -368,11 +381,35 @@ export const ManagerDashboard: React.FC = () => {
                     </div>
                     {isEditingTarget ? <input type="number" value={tempTarget} onChange={(e) => setTempTarget(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xl font-bold w-full text-white" autoFocus /> : <p className="text-3xl font-black mt-1 tracking-tight">{dailyTarget.toLocaleString()} <span className="text-sm font-normal text-slate-400">pts</span></p>}
                 </div>
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Producción (u)</p><p className="text-3xl font-bold text-slate-800 mt-2">{filteredLogs.reduce((sum, log) => sum + log.quantity, 0).toLocaleString()}</p></div>
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Puntos Totales</p><p className="text-3xl font-bold text-blue-600 mt-2">{filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0).toLocaleString('es-AR', {maximumFractionDigits:0})}</p></div>
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Registros</p><p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p></div>
+
+                {/* 2. PUNTOS DECLARADOS (APP) */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500">
+                    <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2"><Box className="w-4 h-4 text-blue-500"/> Declarado (App)</p>
+                    <p className="text-3xl font-bold text-blue-600 mt-2">{totalDeclaredPoints.toLocaleString('es-AR', {maximumFractionDigits:0})}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Suma reportes operarios</p>
+                </div>
+
+                {/* 3. PUNTOS REALES (TANGO) - NUEVO */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500">
+                    <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2"><Scale className="w-4 h-4 text-indigo-500"/> Real (Tango)</p>
+                    <p className="text-3xl font-bold text-indigo-700 mt-2">{totalTangoPoints.toLocaleString('es-AR', {maximumFractionDigits:0})}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">{totalTangoPoints === 0 ? "⚠️ Requiere carga en Auditoría" : "Stock validado"}</p>
+                </div>
+
+                {/* 4. BALANCE / DESVÍO - NUEVO */}
+                <div className={`bg-white p-6 rounded-xl shadow-sm border-l-4 ${globalDifference >= 0 ? 'border-red-500' : 'border-green-500'}`}>
+                    <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2">
+                        {globalDifference >= 0 ? <AlertOctagon className="w-4 h-4 text-red-500"/> : <TrendingDown className="w-4 h-4 text-green-500"/>} 
+                        Balance
+                    </p>
+                    <p className={`text-3xl font-bold mt-2 ${globalDifference >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {globalDifference > 0 ? '+' : ''}{globalDifference.toLocaleString('es-AR', {maximumFractionDigits:0})}
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-1">{globalDifference > 0 ? "Exceso / Stock en Proceso" : "Faltante / Error Carga"}</p>
+                </div>
             </div>
 
+            {/* GRÁFICOS */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
                     <div className="flex justify-between items-center mb-4">
@@ -531,7 +568,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODALES */}
+      {/* --- MODALES --- */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
