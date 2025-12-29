@@ -6,16 +6,16 @@ import {
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
   addNews, deleteNews, getActiveNews, NewsItem,
   deleteOperatorWithData, getLogs,
-  restoreSystemFromBackup // <--- IMPORTANTE: Asegúrate de tener esto importado
+  restoreSystemFromBackup 
 } from '../services/dataService';
 import { Sector, PointRule, ProductionLog } from '../types';
 import { 
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
-  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson 
+  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search // <--- Search Importado
 } from 'lucide-react';
 
-// --- COMPONENTE GESTOR DE LISTAS ---
+// --- COMPONENTE GESTOR DE LISTAS (CON BUSCADOR) ---
 interface ListManagerProps {
   title: string;
   data: string[];
@@ -29,6 +29,9 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
   const [saving, setSaving] = useState(false);
   const [editingItem, setEditingItem] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  
+  // ESTADO DEL BUSCADOR LOCAL
+  const [searchTerm, setSearchTerm] = useState('');
 
   const handleAdd = async () => {
     if (newItem.trim() && !data.includes(newItem)) {
@@ -60,16 +63,42 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
     setEditingItem(null); setEditValue(''); setSaving(false);
   };
 
+  // FILTRADO EN TIEMPO REAL
+  const filteredData = data.filter(item => 
+    item.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-full relative">
+    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-full relative flex flex-col">
       {saving && <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center"><Loader2 className="animate-spin text-orange-600"/></div>}
-      <div className="flex items-center gap-2 mb-4 text-slate-800"><Icon className="w-5 h-5 text-orange-600" /><h3 className="font-bold">{title}</h3></div>
+      
+      <div className="flex items-center gap-2 mb-4 text-slate-800">
+          <Icon className="w-5 h-5 text-orange-600" />
+          <h3 className="font-bold">{title}</h3>
+          <span className="ml-auto text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">{data.length}</span>
+      </div>
+
+      {/* INPUT AGREGAR */}
       <div className="flex gap-2 mb-4">
-        <input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm outline-none text-slate-900" />
+        <input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm outline-none text-slate-900 focus:ring-2 focus:ring-orange-200" />
         <button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 disabled:opacity-50"><Plus className="w-5 h-5" /></button>
       </div>
-      <div className="space-y-2 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
-        {data.map((item) => (
+
+      {/* INPUT BUSCAR (NUEVO) */}
+      <div className="relative mb-2">
+        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>
+        <input 
+            type="text" 
+            placeholder="Buscar..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 outline-none focus:border-blue-300 transition-colors"
+        />
+      </div>
+
+      {/* LISTA FILTRADA */}
+      <div className="space-y-2 max-h-80 overflow-y-auto pr-1 custom-scrollbar flex-1">
+        {filteredData.map((item) => (
           <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group transition-colors ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
             {editingItem === item ? (
               <div className="flex w-full items-center gap-2">
@@ -88,7 +117,7 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
             )}
           </div>
         ))}
-        {data.length === 0 && <p className="text-slate-400 text-xs italic text-center py-4">Lista vacía</p>}
+        {filteredData.length === 0 && <p className="text-slate-400 text-xs italic text-center py-4">No se encontraron resultados</p>}
       </div>
     </div>
   );
@@ -108,6 +137,7 @@ export const AdminPanel: React.FC = () => {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
+  const [matrixSearch, setMatrixSearch] = useState(''); // <--- BUSCADOR MATRIZ
 
   const [activeNews, setActiveNews] = useState<NewsItem[]>([]);
   const [newsForm, setNewsForm] = useState({ title: '', content: '', duration: '24' });
@@ -203,7 +233,7 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
   };
 
-  // --- LÓGICA DE BACKUP (EXPORTAR) ---
+  // --- LOGICA DE BACKUP ---
   const handleFullBackup = async () => {
     setBackingUp(true);
     try {
@@ -226,7 +256,7 @@ export const AdminPanel: React.FC = () => {
     } catch (e) { console.error(e); alert("Error al generar el respaldo."); } finally { setBackingUp(false); }
   };
 
-  // --- LÓGICA DE IMPORTACIÓN SIMPLE (LEGACY - PARA AGREGAR NUEVOS) ---
+  // --- LOGICA DE IMPORTACIÓN ---
   const handleBulkImport = async () => {
     if (!jsonImport || !window.confirm("¿Importar datos?")) return;
     setImporting(true);
@@ -243,6 +273,13 @@ export const AdminPanel: React.FC = () => {
       await loadData(); alert(`Importados: ${added}`); setJsonImport('');
     } catch (e) { alert("Error en JSON"); } finally { setImporting(false); }
   };
+
+  // FILTRADO MATRIZ
+  const filteredMatrix = matrix.filter(rule => 
+    rule.model.toLowerCase().includes(matrixSearch.toLowerCase()) || 
+    rule.operation.toLowerCase().includes(matrixSearch.toLowerCase()) ||
+    rule.sector.toLowerCase().includes(matrixSearch.toLowerCase())
+  );
 
   if (loading && matrix.length === 0) return <div className="flex justify-center p-10"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>;
 
@@ -314,8 +351,21 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
           
+          {/* BUSCADOR MATRIZ (NUEVO) */}
+          <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center gap-3">
+             <Search className="w-5 h-5 text-slate-400"/>
+             <input 
+                type="text" 
+                placeholder="Buscar en la matriz (Modelo, Operación, Sector)..." 
+                className="flex-1 outline-none text-sm text-slate-700 bg-transparent"
+                value={matrixSearch}
+                onChange={e => setMatrixSearch(e.target.value)}
+             />
+             {matrixSearch && <button onClick={() => setMatrixSearch('')} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>}
+          </div>
+
           <div className="grid grid-cols-1 gap-4 md:hidden">
-            {matrix.map((rule) => (
+            {filteredMatrix.map((rule) => (
               <div key={rule.id} className={`bg-white p-4 rounded-xl shadow-sm border-l-4 ${editingId === rule.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-orange-500'}`}>
                 <div className="flex justify-between items-start mb-2">
                   <div><h4 className="font-bold text-slate-800">{rule.model}</h4><span className="text-[10px] uppercase font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded">{rule.sector}</span></div>
@@ -328,7 +378,7 @@ export const AdminPanel: React.FC = () => {
                 </div>
               </div>
             ))}
-            {matrix.length === 0 && <p className="text-center text-slate-400 py-10">No hay reglas.</p>}
+            {filteredMatrix.length === 0 && <p className="text-center text-slate-400 py-10">No hay reglas coincidentes.</p>}
           </div>
 
           <div className="hidden md:block bg-white rounded-xl shadow-sm overflow-hidden border-t-2 border-orange-200">
@@ -337,7 +387,7 @@ export const AdminPanel: React.FC = () => {
                 <tr><th className="px-6 py-3">Sector</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3">Operación</th><th className="px-6 py-3 text-right">Pts/Unidad</th><th className="px-6 py-3 text-center">Acción</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {matrix.map((rule) => (
+                {filteredMatrix.map((rule) => (
                   <tr key={rule.id} className={`hover:bg-slate-50 ${editingId === rule.id ? 'bg-blue-50' : ''}`}>
                     <td className="px-6 py-3">{rule.sector}</td><td className="px-6 py-3 font-medium">{rule.model}</td><td className="px-6 py-3">{rule.operation}</td><td className="px-6 py-3 text-right font-bold text-orange-600">{rule.pointsPerUnit}</td>
                     <td className="px-6 py-3 text-center flex justify-center gap-2">
@@ -346,7 +396,7 @@ export const AdminPanel: React.FC = () => {
                     </td>
                   </tr>
                 ))}
-                {matrix.length === 0 && <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No hay reglas definidas.</td></tr>}
+                {filteredMatrix.length === 0 && <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No hay reglas coincidentes.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -356,23 +406,23 @@ export const AdminPanel: React.FC = () => {
       {activeTab === 'news' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-fit">
-             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Megaphone className="w-5 h-5 text-orange-600" /> Nuevo Comunicado</h3>
-             <div className="space-y-4">
-               <div><label className="block text-xs font-bold text-slate-500 mb-1">TÍTULO</label><input className="w-full border p-2 rounded bg-slate-50" value={newsForm.title} onChange={e => setNewsForm({...newsForm, title: e.target.value})}/></div>
-               <div><label className="block text-xs font-bold text-slate-500 mb-1">MENSAJE</label><textarea className="w-full border p-2 rounded bg-slate-50 h-24" value={newsForm.content} onChange={e => setNewsForm({...newsForm, content: e.target.value})}/></div>
-               <div><label className="block text-xs font-bold text-slate-500 mb-1">DURACIÓN</label><select className="w-full border p-2 rounded bg-slate-50" value={newsForm.duration} onChange={e => setNewsForm({...newsForm, duration: e.target.value})}><option value="24">24 Horas</option><option value="48">48 Horas</option><option value="168">1 Semana</option></select></div>
-               <button onClick={handleAddNews} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700">Publicar</button>
-             </div>
+              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Megaphone className="w-5 h-5 text-orange-600" /> Nuevo Comunicado</h3>
+              <div className="space-y-4">
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">TÍTULO</label><input className="w-full border p-2 rounded bg-slate-50" value={newsForm.title} onChange={e => setNewsForm({...newsForm, title: e.target.value})}/></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">MENSAJE</label><textarea className="w-full border p-2 rounded bg-slate-50 h-24" value={newsForm.content} onChange={e => setNewsForm({...newsForm, content: e.target.value})}/></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">DURACIÓN</label><select className="w-full border p-2 rounded bg-slate-50" value={newsForm.duration} onChange={e => setNewsForm({...newsForm, duration: e.target.value})}><option value="24">24 Horas</option><option value="48">48 Horas</option><option value="168">1 Semana</option></select></div>
+                <button onClick={handleAddNews} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700">Publicar</button>
+              </div>
           </div>
           <div className="space-y-4">
-             {activeNews.map(item => (
-               <div key={item.id} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500 relative">
-                 <button onClick={() => handleDeleteNews(item.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
-                 <h4 className="font-bold text-slate-800">{item.title}</h4>
-                 <p className="text-slate-600 text-sm mt-1">{item.content}</p>
-                 <div className="mt-3 text-xs text-slate-400">Vence: {new Date(item.expiresAt).toLocaleString()}</div>
-               </div>
-             ))}
+              {activeNews.map(item => (
+                <div key={item.id} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500 relative">
+                  <button onClick={() => handleDeleteNews(item.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                  <h4 className="font-bold text-slate-800">{item.title}</h4>
+                  <p className="text-slate-600 text-sm mt-1">{item.content}</p>
+                  <div className="mt-3 text-xs text-slate-400">Vence: {new Date(item.expiresAt).toLocaleString()}</div>
+                </div>
+              ))}
           </div>
         </div>
       )}
