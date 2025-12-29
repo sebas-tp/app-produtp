@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2
+  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -52,7 +52,7 @@ export const ManagerDashboard: React.FC = () => {
   // --- INPUTS TANGO (AUDITORÍA) ---
   const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({});
 
-  // --- ESTADO PARA ACORDEÓN CONTABLE (NUEVO) ---
+  // --- ESTADO PARA ACORDEÓN CONTABLE ---
   const [expandedSector, setExpandedSector] = useState<string | null>(null);
 
   // --- SEGURIDAD ---
@@ -185,7 +185,6 @@ export const ManagerDashboard: React.FC = () => {
 
   // --- CÁLCULOS 4: CONTABILIDAD (CENTROS DE COSTO) ---
   const getAccountingData = () => {
-    // 1. Normalizador de Centros de Costo
     const normalizeCostCenter = (sectorName: string) => {
         const s = sectorName.toUpperCase();
         if (s.includes('CORTE')) return 'CORTE';
@@ -195,7 +194,6 @@ export const ManagerDashboard: React.FC = () => {
         return 'OTROS';
     };
 
-    // 2. Agrupar Operarios por Centro de Costo (Basado en donde produjeron más)
     const opSectorMap: Record<string, string> = {};
     const opPoints: Record<string, number> = {};
     const opPointsPerRawSector: Record<string, Record<string, number>> = {};
@@ -211,14 +209,11 @@ export const ManagerDashboard: React.FC = () => {
 
     Object.keys(opPointsPerRawSector).forEach(op => {
         const sectors = opPointsPerRawSector[op];
-        // Buscar el sector predominante
         const bestRawSector = Object.keys(sectors).reduce((a, b) => sectors[a] > sectors[b] ? a : b);
         opSectorMap[op] = normalizeCostCenter(bestRawSector);
     });
 
-    // 3. Calcular Producción Real por Centro de Costo (Desde Tango)
     const sectorRealProd: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0, 'OTROS':0 };
-    
     Object.keys(tangoInputs).forEach(model => {
         const qty = parseInt(tangoInputs[model] || '0');
         if (qty > 0) {
@@ -230,23 +225,18 @@ export const ManagerDashboard: React.FC = () => {
         }
     });
 
-    // 4. Construir Estructura Final
     const costCenters = ['CORTE', 'COSTURA', 'ARMADO', 'EMBALAJE'];
     
     const reportData = costCenters.map(cc => {
-        // Filtrar operarios de este centro
         const operatorsInCC = Object.keys(opSectorMap).filter(op => opSectorMap[op] === cc);
-        
         let totalCapacity = 0;
         let totalDeclared = 0;
         const operatorDetails = operatorsInCC.map(op => {
             const days = customDays[op] !== undefined ? customDays[op] : globalDays;
             const capacity = days * shiftHours * pointsPerHour;
             const declared = opPoints[op] || 0;
-            
             totalCapacity += capacity;
             totalDeclared += declared;
-
             return { name: op, capacity, declared, efficiency: capacity > 0 ? (declared/capacity)*100 : 0 };
         });
 
@@ -272,12 +262,15 @@ export const ManagerDashboard: React.FC = () => {
   const efficiencyData = getEfficiencyData();
   const accountingData = getAccountingData();
 
-  // Para KPIs métricas
+  // KPIs Globales para Balance
   const totalTangoPoints = auditData.reduce((sum, item) => sum + item.theoreticalPoints, 0);
+  // OJO: Si filtramos por operario, totalDeclared es solo de ese operario, pero Tango sigue siendo global.
   const totalDeclaredPoints = filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0);
-  const globalDifference = totalDeclaredPoints - totalTangoPoints;
+  
+  // Si hay filtro de operario, el balance no se puede calcular bien contra el stock global
+  const isGlobalView = selectedOperator === 'all';
+  const globalDifference = isGlobalView ? (totalDeclaredPoints - totalTangoPoints) : 0;
 
-  // Para KPIs Contables
   const totalPlantCapacity = accountingData.reduce((sum, item) => sum + item.capacity, 0);
   const totalPlantReal = accountingData.reduce((sum, item) => sum + item.real, 0);
   const plantProductivity = totalPlantCapacity > 0 ? (totalPlantReal / totalPlantCapacity) * 100 : 0;
@@ -331,7 +324,11 @@ export const ManagerDashboard: React.FC = () => {
 
     if (activeTab === 'audit') {
         doc.text("AUDITORÍA STOCK", 14, 45);
-        autoTable(doc, { startY: 50, head: [['Modelo', 'Valor Std', 'Tango', 'Teórico', 'Declarado', 'Desvío', 'Estado']], body: auditData.map(d => [d.model, d.standardValue.toFixed(1), d.tangoQty, d.theoreticalPoints.toFixed(0), d.declaredPoints.toFixed(0), d.difference.toFixed(0), Math.abs(d.deviationPct)<5?"OK":"REV"]) });
+        autoTable(doc, { 
+            startY: 50, 
+            head: [['Modelo', 'Valor Std', 'Tango', 'Teórico', 'Declarado', 'Desvío', 'Estado']], 
+            body: auditData.map(d => [d.model, d.standardValue.toFixed(1), d.tangoQty, d.theoreticalPoints.toFixed(0), d.declaredPoints.toFixed(0), d.difference.toFixed(0), Math.abs(d.deviationPct)<5?"OK":(d.difference > 0 ? "Exceso" : "Faltante")]) 
+        });
     } else if (activeTab === 'efficiency') {
         doc.text("EFICIENCIA Y OCIO", 14, 45);
         const data = getEfficiencyData();
@@ -351,7 +348,12 @@ export const ManagerDashboard: React.FC = () => {
         });
     } else {
         doc.text("Resumen de Métricas Generales", 14, 45);
-        autoTable(doc, { startY: 50, head: [['Fecha', 'Operario', 'Modelo', 'Cant', 'Pts', 'Obs']], body: filteredLogs.slice(0, 100).map(l => [new Date(l.timestamp).toLocaleDateString(), l.operatorName, l.model, l.quantity, l.totalPoints.toFixed(1), l.comments||'-']) });
+        autoTable(doc, { 
+            startY: 50, 
+            head: [['Fecha', 'Operario', 'Modelo', 'Cant', 'Pts', 'Obs']], 
+            body: filteredLogs.slice(0, 100).map(l => [new Date(l.timestamp).toLocaleDateString(), l.operatorName, l.model, l.quantity, l.totalPoints.toFixed(1), l.comments||'-']),
+            columnStyles: { 5: { cellWidth: 50 } }
+        });
     }
     doc.save(`Reporte_${activeTab}_${startDate}.pdf`); setIsGeneratingPDF(false);
   };
@@ -410,9 +412,10 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 1. PESTAÑA MÉTRICAS */}
+      {/* PESTAÑA 1: MÉTRICAS (Con las nuevas tarjetas de comparación) */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
+            {/* KPI CARDS REDISEÑADAS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
@@ -425,37 +428,73 @@ export const ManagerDashboard: React.FC = () => {
                     <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2"><Box className="w-4 h-4 text-blue-500"/> Declarado (App)</p>
                     <p className="text-3xl font-bold text-blue-600 mt-2">{totalDeclaredPoints.toLocaleString('es-AR', {maximumFractionDigits:0})}</p>
                 </div>
-                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500">
-                    <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2"><Scale className="w-4 h-4 text-indigo-500"/> Real (Tango)</p>
-                    <p className="text-3xl font-bold text-indigo-700 mt-2">{totalTangoPoints.toLocaleString('es-AR', {maximumFractionDigits:0})}</p>
-                </div>
-                <div className={`bg-white p-6 rounded-xl shadow-sm border-l-4 ${globalDifference >= 0 ? 'border-red-500' : 'border-green-500'}`}>
-                    <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2">Balance</p>
-                    <p className={`text-3xl font-bold mt-2 ${globalDifference >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {globalDifference > 0 ? '+' : ''}{globalDifference.toLocaleString('es-AR', {maximumFractionDigits:0})}
-                    </p>
-                </div>
+                {isGlobalView ? (
+                    <>
+                        <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500">
+                            <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2"><Scale className="w-4 h-4 text-indigo-500"/> Real (Tango)</p>
+                            <p className="text-3xl font-bold text-indigo-700 mt-2">{totalTangoPoints.toLocaleString('es-AR', {maximumFractionDigits:0})}</p>
+                        </div>
+                        <div className={`bg-white p-6 rounded-xl shadow-sm border-l-4 ${globalDifference >= 0 ? 'border-red-500' : 'border-green-500'}`}>
+                            <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2">Balance Global</p>
+                            <p className={`text-3xl font-bold mt-2 ${globalDifference >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {globalDifference > 0 ? '+' : ''}{globalDifference.toLocaleString('es-AR', {maximumFractionDigits:0})}
+                            </p>
+                        </div>
+                    </>
+                ) : (
+                    <div className="md:col-span-2 bg-slate-50 p-6 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 gap-2">
+                        <Info className="w-5 h-5"/>
+                        <p className="text-sm">Para ver Balance vs Tango, seleccione "Global".</p>
+                    </div>
+                )}
             </div>
 
+            {/* GRÁFICOS */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-md font-bold text-slate-800 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
-                        <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
-                            <Filter className="w-3 h-3 text-slate-500"/>
-                            <select value={rankingFilter} onChange={(e) => setRankingFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"><option value="Global">Global</option><option disabled>──────</option>{Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}</select>
-                        </div>
-                    </div>
-                    <div className="overflow-y-auto flex-1 pr-2 space-y-3">
-                        {rankingStatsForMetrics.map((stat, idx) => (
-                        <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative overflow-hidden">
-                            {idx < 3 && <div className={`absolute top-0 right-0 p-1 px-2 text-[10px] font-bold text-white rounded-bl-lg ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-400')}`}>#{idx+1}</div>}
-                            <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
-                            <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
-                        </div>
-                        ))}
-                    </div>
+                    {selectedOperator === 'all' ? (
+                        <>
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-md font-bold text-slate-800 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
+                                <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
+                                    <Filter className="w-3 h-3 text-slate-500"/>
+                                    <select value={rankingFilter} onChange={(e) => setRankingFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"><option value="Global">Global</option><option disabled>──────</option>{Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}</select>
+                                </div>
+                            </div>
+                            <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+                                {rankingStatsForMetrics.map((stat, idx) => (
+                                <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative overflow-hidden">
+                                    {idx < 3 && <div className={`absolute top-0 right-0 p-1 px-2 text-[10px] font-bold text-white rounded-bl-lg ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-400')}`}>#{idx+1}</div>}
+                                    <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
+                                    <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+                                </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <h3 className="text-md font-bold text-slate-800 mb-4 flex items-center gap-2"><Activity className="w-5 h-5 text-blue-600" /> Rendimiento Diario</h3>
+                            <div className="overflow-y-auto flex-1 border rounded-lg">
+                                <table className="w-full text-xs">
+                                    <thead className="bg-slate-50 text-slate-500 uppercase sticky top-0"><tr><th className="p-2 text-left">Fecha</th><th className="p-2 text-right">Pts</th><th className="p-2 text-right">%</th></tr></thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {dailyTrend.map((day) => {
+                                            const eff = (day.points / dailyTarget) * 100;
+                                            return (
+                                                <tr key={day.fullDate} className="hover:bg-slate-50">
+                                                    <td className="p-2 font-medium">{day.name}</td>
+                                                    <td className="p-2 text-right font-bold text-blue-600">{day.points.toFixed(0)}</td>
+                                                    <td className="p-2 text-right"><span className={`px-1.5 py-0.5 rounded ${eff>=100?'bg-green-100 text-green-700':(eff>=80?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-700')}`}>{eff.toFixed(0)}%</span></td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </>
+                    )}
                 </div>
+
                 <div id="chart-trend" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 lg:col-span-2">
                     <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
                     <ResponsiveContainer width="100%" height="100%">
@@ -497,7 +536,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 2. PESTAÑA EFICIENCIA */}
+      {/* PESTAÑA 2: EFICIENCIA */}
       {activeTab === 'efficiency' && (
          <div className="animate-in fade-in space-y-6">
             <div className="bg-indigo-50 p-6 rounded-xl shadow-md border-l-4 border-indigo-600">
@@ -507,8 +546,8 @@ export const ManagerDashboard: React.FC = () => {
                         <p className="text-slate-600 text-sm mt-1">Detección de superávit de producción y tiempo ocioso.</p>
                     </div>
                     <div className="bg-white p-1 rounded-lg border border-indigo-100 flex">
-                        <button onClick={() => setEfficiencyView('operator')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${efficiencyView === 'operator' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}><LayoutList className="w-4 h-4 inline mr-1"/> Detalle</button>
-                        <button onClick={() => setEfficiencyView('sector')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${efficiencyView === 'sector' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}><Layers className="w-4 h-4 inline mr-1"/> Resumen</button>
+                        <button onClick={() => setEfficiencyView('operator')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${efficiencyView === 'operator' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}><LayoutList className="w-4 h-4 inline mr-1"/> Detalle Operario</button>
+                        <button onClick={() => setEfficiencyView('sector')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${efficiencyView === 'sector' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}><Layers className="w-4 h-4 inline mr-1"/> Resumen Sector</button>
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-4 bg-white p-4 rounded-lg shadow-sm border border-indigo-100 mt-4 items-end">
@@ -519,15 +558,17 @@ export const ManagerDashboard: React.FC = () => {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                 <div className="px-6 py-4 border-b border-slate-100"><h3 className="font-bold text-slate-700">Reporte de Desempeño</h3></div>
+                 <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                    <h3 className="font-bold text-slate-700">{efficiencyView === 'operator' ? 'Análisis Individual (Días Editables)' : 'Rendimiento por Sector'}</h3>
+                 </div>
                  <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-slate-50 text-xs text-slate-500 uppercase sticky top-0">
                             <tr>
                                 <th className="px-6 py-4">{efficiencyView === 'operator' ? 'Operario' : 'Sector'}</th>
-                                {efficiencyView === 'operator' && <th className="px-6 py-4 text-center">Días Trab.</th>}
+                                {efficiencyView === 'operator' && <th className="px-6 py-4 text-center w-32">Días Trab.</th>}
                                 {efficiencyView === 'sector' && <th className="px-6 py-4 text-center">Cant. Op.</th>}
-                                <th className="px-6 py-4 text-right">Real (Pts)</th>
+                                <th className="px-6 py-4 text-right">Prod. Real</th>
                                 <th className="px-6 py-4 text-right text-indigo-600">Capacidad</th>
                                 <th className="px-6 py-4 text-right font-bold">Balance</th>
                                 <th className="px-6 py-4 text-center">Rendimiento</th>
@@ -559,7 +600,7 @@ export const ManagerDashboard: React.FC = () => {
          </div>
       )}
 
-      {/* 3. PESTAÑA AUDITORÍA */}
+      {/* PESTAÑA 3: AUDITORÍA */}
       {activeTab === 'audit' && (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
@@ -570,7 +611,7 @@ export const ManagerDashboard: React.FC = () => {
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="bg-slate-50 text-slate-700 uppercase text-xs font-bold border-b border-slate-200">
-                            <tr><th className="px-6 py-4">Modelo</th><th className="px-6 py-4 text-right bg-blue-50/50">Valor Std</th><th className="px-6 py-4 text-right bg-blue-50/50">Declarado</th><th className="px-6 py-4 text-center bg-red-50/50 w-48">Cant. Real (Tango)</th><th className="px-6 py-4 text-right bg-red-50/50">Teórico</th><th className="px-6 py-4 text-right">Desvío</th></tr>
+                            <tr><th className="px-6 py-4">Modelo</th><th className="px-6 py-4 text-right bg-blue-50/50">Valor Std</th><th className="px-6 py-4 text-right bg-blue-50/50">Declarado</th><th className="px-6 py-4 text-center bg-red-50/50 w-48">Cant. Real (Tango)</th><th className="px-6 py-4 text-right bg-red-50/50">Teórico</th><th className="px-6 py-4 text-right">Desvío</th><th className="px-6 py-4 text-center">Estado</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {auditData.map((row) => (
@@ -581,6 +622,7 @@ export const ManagerDashboard: React.FC = () => {
                                     <td className="px-6 py-4 bg-red-50/30"><div className="flex items-center justify-center"><input type="number" className="w-24 border border-red-200 rounded p-1 text-center font-bold text-slate-800 outline-none focus:ring-2 focus:ring-red-500" placeholder="0" value={tangoInputs[row.model] || ''} onChange={(e) => setTangoInputs({...tangoInputs, [row.model]: e.target.value})}/><span className="text-xs text-slate-400 ml-1">u.</span></div></td>
                                     <td className="px-6 py-4 text-right font-mono text-slate-600 bg-red-50/30">{row.theoreticalPoints.toLocaleString()}</td>
                                     <td className={`px-6 py-4 text-right font-bold ${row.difference > 0 ? 'text-red-600' : 'text-green-600'}`}>{row.difference > 0 ? '+' : ''}{row.difference.toLocaleString()}</td>
+                                    <td className="px-6 py-4 text-center">{Math.abs(row.deviationPct) < 5 ? <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold border border-green-200">OK</span> : <span className={`px-2 py-1 rounded text-xs font-bold border ${row.difference > 0 ? 'bg-red-100 text-red-700 border-red-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'}`}>{row.difference > 0 ? 'Exceso' : 'Faltante'} ({Math.abs(row.deviationPct).toFixed(0)}%)</span>}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -590,10 +632,9 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 4. PESTAÑA CONTABILIDAD (NUEVA MEJORADA) */}
+      {/* PESTAÑA 4: CONTABILIDAD */}
       {activeTab === 'accounting' && (
         <div className="animate-in fade-in space-y-6">
-            {/* KPI Cards Contables */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-slate-400">
                     <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Briefcase className="w-4 h-4"/> Capacidad Instalada (Total)</p>
@@ -629,12 +670,12 @@ export const ManagerDashboard: React.FC = () => {
                     <tbody className="divide-y divide-slate-100">
                         {accountingData.map((row) => (
                             <React.Fragment key={row.center}>
-                                <tr className="hover:bg-slate-50 cursor-pointer" onClick={() => setExpandedSector(expandedSector === row.center ? null : row.center)}>
+                                <tr className={row.center === 'TOTAL PLANTA' ? "bg-slate-100 font-bold border-t-2 border-slate-300" : "hover:bg-slate-50 cursor-pointer"} onClick={() => row.center !== 'TOTAL PLANTA' && setExpandedSector(expandedSector === row.center ? null : row.center)}>
                                     <td className="px-6 py-4 font-bold text-slate-800 flex items-center gap-2">
-                                        <div className={`w-3 h-3 rounded-full ${row.productivity >= 80 ? 'bg-green-500' : (row.productivity >= 50 ? 'bg-yellow-500' : 'bg-red-500')}`}></div>
+                                        {row.center !== 'TOTAL PLANTA' && <div className={`w-3 h-3 rounded-full ${row.productivity >= 80 ? 'bg-green-500' : (row.productivity >= 50 ? 'bg-yellow-500' : 'bg-red-500')}`}></div>}
                                         {row.center}
                                     </td>
-                                    <td className="px-6 py-4 text-center font-bold text-slate-600">{row.headcount}</td>
+                                    <td className="px-6 py-4 text-center font-bold text-slate-600">{row.headcount || '-'}</td>
                                     <td className="px-6 py-4 text-right text-slate-500 font-mono">{row.capacity.toLocaleString('es-AR')}</td>
                                     <td className="px-6 py-4 text-right text-emerald-700 bg-emerald-50/30 font-mono font-bold">{row.real.toLocaleString('es-AR')}</td>
                                     <td className="px-6 py-4 text-right">
@@ -643,10 +684,10 @@ export const ManagerDashboard: React.FC = () => {
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-center text-slate-400">
-                                        {expandedSector === row.center ? <ChevronDown className="w-5 h-5 mx-auto"/> : <ChevronRight className="w-5 h-5 mx-auto"/>}
+                                        {row.center !== 'TOTAL PLANTA' && (expandedSector === row.center ? <ChevronDown className="w-5 h-5 mx-auto"/> : <ChevronRight className="w-5 h-5 mx-auto"/>)}
                                     </td>
                                 </tr>
-                                {expandedSector === row.center && (
+                                {expandedSector === row.center && row.operators && (
                                     <tr>
                                         <td colSpan={6} className="bg-slate-50 p-4 border-b border-slate-200 shadow-inner">
                                             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
