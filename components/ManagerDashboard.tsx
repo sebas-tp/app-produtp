@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Scale, AlertTriangle, Clock, AlertOctagon
+  Scale, AlertTriangle, Clock, AlertOctagon, Timer
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,8 +26,10 @@ export const ManagerDashboard: React.FC = () => {
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // --- UI / FILTROS ---
-  const [activeTab, setActiveTab] = useState<'metrics' | 'audit'>('metrics');
+  // --- UI / PESTAÑAS ---
+  // AHORA TENEMOS 3 PESTAÑAS: metrics (original), efficiency (ocio), audit (tango)
+  const [activeTab, setActiveTab] = useState<'metrics' | 'efficiency' | 'audit'>('metrics');
+  
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
@@ -37,10 +39,10 @@ export const ManagerDashboard: React.FC = () => {
   const [selectedOperator, setSelectedOperator] = useState<string>('all');
   const [rankingFilter, setRankingFilter] = useState<string>('Global');
 
-  // --- CONFIGURACIÓN DE EFICIENCIA (NUEVO) ---
-  const [workingDays, setWorkingDays] = useState<number>(5); // Días trabajados en el periodo
-  const [shiftHours, setShiftHours] = useState<number>(8.5); // Horas por turno
-  const [pointsPerHour, setPointsPerHour] = useState<number>(3600); // Base de cálculo
+  // --- CONFIGURACIÓN DE EFICIENCIA (PESTAÑA 2) ---
+  const [workingDays, setWorkingDays] = useState<number>(17); // Default ej: 17 días
+  const [shiftHours, setShiftHours] = useState<number>(8.5);  // Default 8.5hs
+  const [pointsPerHour, setPointsPerHour] = useState<number>(3600); 
 
   // --- META Y AUDITORÍA ---
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
@@ -57,7 +59,7 @@ export const ManagerDashboard: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  const MASTER_PASSWORD = "admin123";
+  const MASTER_PASSWORD = "admin"; // Tu clave original (o la que hayas puesto)
 
   // --- INICIALIZACIÓN ---
   useEffect(() => {
@@ -98,7 +100,7 @@ export const ManagerDashboard: React.FC = () => {
     setFilteredLogs(filtered);
   };
 
-  // --- CÁLCULOS VISUALES Y EFICIENCIA ---
+  // --- CÁLCULOS GENERALES ---
   const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
     const date = log.timestamp.split('T')[0]; 
     const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
@@ -109,20 +111,20 @@ export const ManagerDashboard: React.FC = () => {
   }, {} as Record<string, { fullDate:string, name: string; points: number; quantity: number }>))
   .sort((a, b) => a.fullDate.localeCompare(b.fullDate));
 
-  // CÁLCULO DE RANKING CON OCIO (NUEVO)
+  // DATOS PARA RANKING Y EFICIENCIA
   const rankingStats = Object.values(filteredLogs.filter(log => rankingFilter === 'Global' || log.sector === rankingFilter).reduce((acc, log) => {
     if (!acc[log.operatorName]) acc[log.operatorName] = { name: log.operatorName, points: 0, quantity: 0 };
     acc[log.operatorName].points += log.totalPoints; acc[log.operatorName].quantity += log.quantity; return acc;
   }, {} as Record<string, { name: string; points: number; quantity: number }>))
   .map(stat => {
-      // FÓRMULA DEL USUARIO: Días * Horas * 3600
+      // Cálculo de eficiencia
       const potentialPoints = workingDays * shiftHours * pointsPerHour;
       const idlePoints = potentialPoints - stat.points;
       const idlePercentage = potentialPoints > 0 ? (idlePoints / potentialPoints) * 100 : 0;
       
       return { 
           ...stat, 
-          percentage: (stat.points / dailyTarget) * 100, // vs Meta diaria (referencia simple)
+          percentage: (stat.points / dailyTarget) * 100, // % vs Meta Diaria (para visualización simple)
           potentialPoints,
           idlePoints,
           idlePercentage
@@ -140,7 +142,7 @@ export const ManagerDashboard: React.FC = () => {
   
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
 
-  // --- AUDITORÍA (STOCK) ---
+  // --- CÁLCULO AUDITORÍA (STOCK) ---
   const getAuditData = () => {
     const modelsInLogs = Array.from(new Set(filteredLogs.map(l => l.model)));
     return modelsInLogs.map(modelName => {
@@ -154,12 +156,12 @@ export const ManagerDashboard: React.FC = () => {
     }).sort((a, b) => b.declaredPoints - a.declaredPoints);
   };
 
-  // --- HANDLERS VARIOS ---
+  // --- HANDLERS ---
   const handleSaveTarget = async () => {
     const newVal = parseInt(tempTarget);
     if (!isNaN(newVal) && newVal > 0) { await saveProductivityTarget(newVal); setDailyTarget(newVal); setIsEditingTarget(false); refreshData(); }
   };
-  const handleClearData = async () => { if (window.confirm("¡PELIGRO! ¿Borrar todo el historial?")) { setLoading(true); await clearLogs(); await refreshData(); }};
+  const handleClearData = async () => { if (window.confirm("¡PELIGRO! ¿Borrar historial?")) { setLoading(true); await clearLogs(); await refreshData(); }};
   const handleDownloadExcel = () => { downloadCSV(filteredLogs, `Reporte_${selectedOperator}_${startDate}`); };
   const handleDownloadStandardPDF = () => { downloadPDF(filteredLogs, `Reporte: ${startDate} al ${endDate}`, `Reporte_${startDate}`); };
   const handleEngineeringAccess = () => { if (isAuthorized) openEngineeringModal(); else setShowAuthModal(true); };
@@ -170,29 +172,25 @@ export const ManagerDashboard: React.FC = () => {
   const handleFullReportPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
     
-    doc.setFontSize(22); doc.setTextColor(30, 41, 59); doc.text(`Informe Técnico de Producción`, 14, 20);
+    doc.setFontSize(22); doc.setTextColor(30, 41, 59); doc.text(`Informe Técnico`, 14, 20);
     doc.setFontSize(10); doc.setTextColor(100); doc.text(`TopSafe S.A. | ${new Date().toLocaleDateString()}`, 14, 28);
     
+    // PDF SEGÚN PESTAÑA ACTIVA
     if (activeTab === 'audit') {
         const auditData = getAuditData();
-        doc.text("REPORTE DE AUDITORÍA (VS TANGO)", 14, 45);
+        doc.text("AUDITORÍA DE STOCK", 14, 45);
         autoTable(doc, { startY: 50, head: [['Modelo', 'Valor Std', 'Tango', 'Teórico', 'Declarado', 'Desvío']], body: auditData.map(d => [d.model, d.standardValue.toFixed(1), d.tangoQty, d.theoreticalPoints.toFixed(0), d.declaredPoints.toFixed(0), d.difference.toFixed(0)]) });
-        doc.save(`Auditoria.pdf`); setIsGeneratingPDF(false); return;
+    } else if (activeTab === 'efficiency') {
+        doc.text("REPORTE DE OCIO Y EFICIENCIA", 14, 45);
+        doc.text(`Base: ${workingDays} días x ${shiftHours} hs`, 14, 52);
+        autoTable(doc, { startY: 55, head: [['Operario', 'Real', 'Potencial', 'Ocio (Pts)', '% Ocio']], body: rankingStats.map(s => [s.name, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.idlePoints.toFixed(0), s.idlePercentage.toFixed(1) + '%']) });
+    } else {
+        doc.text("RESUMEN DE MÉTRICAS", 14, 45);
+        autoTable(doc, { startY: 50, head: [['Fecha', 'Real', 'Meta', '%']], body: dailyTrend.map(d => [d.name, d.points.toLocaleString(), dailyTarget.toLocaleString(), ((d.points/dailyTarget)*100).toFixed(0)+'%']) });
     }
     
-    doc.text("Resumen de Eficiencia", 14, 45);
-    // Tabla de eficiencia en PDF
-    const effRows = rankingStats.map(stat => [
-        stat.name, 
-        stat.points.toFixed(0), 
-        stat.potentialPoints.toFixed(0), 
-        stat.idlePoints.toFixed(0),
-        stat.idlePercentage.toFixed(1) + '%'
-    ]);
-    autoTable(doc, { startY: 50, head: [['Operario', 'Real', 'Potencial', 'Ocio (Pts)', '% Ocio']], body: effRows });
-    doc.save(`Reporte_Eficiencia.pdf`); setIsGeneratingPDF(false);
+    doc.save(`Reporte_${activeTab}.pdf`); setIsGeneratingPDF(false);
   };
 
   if (loading && allLogs.length === 0) return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>;
@@ -201,18 +199,20 @@ export const ManagerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 p-4 md:p-8 pb-20">
-      {/* HEADER */}
+      {/* HEADER PRINCIPAL */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
-           <div className="flex gap-4 mt-2">
-             <button onClick={() => setActiveTab('metrics')} className={`text-sm font-bold px-3 py-1 rounded-full transition-colors ${activeTab === 'metrics' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Métricas & Ocio</button>
-             <button onClick={() => setActiveTab('audit')} className={`text-sm font-bold px-3 py-1 rounded-full transition-colors ${activeTab === 'audit' ? 'bg-red-100 text-red-700' : 'text-slate-500 hover:bg-slate-50'}`}>Auditoría vs Tango</button>
+           {/* PESTAÑAS DE NAVEGACIÓN */}
+           <div className="flex gap-2 mt-2 bg-slate-100 p-1 rounded-full w-fit">
+             <button onClick={() => setActiveTab('metrics')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'metrics' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Métricas</button>
+             <button onClick={() => setActiveTab('efficiency')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'efficiency' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Eficiencia & Ocio</button>
+             <button onClick={() => setActiveTab('audit')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'audit' ? 'bg-white text-red-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Auditoría Stock</button>
            </div>
         </div>
         
         <div className="flex flex-wrap gap-3 items-center">
-            {activeTab === 'metrics' && (
+            {activeTab !== 'audit' && (
                 <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
                     <Users className="w-4 h-4 text-slate-500" />
                     <select value={selectedOperator} onChange={(e) => setSelectedOperator(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700 font-medium">
@@ -229,107 +229,153 @@ export const ManagerDashboard: React.FC = () => {
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
             </div>
             <div className="flex gap-2">
-                <button onClick={handleFullReportPDF} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="Descargar Reporte"><FileText className="w-5 h-5" /></button>
+                <button onClick={handleFullReportPDF} className="p-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700" title="PDF"><FileText className="w-5 h-5" /></button>
                 <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"><RefreshCw className="w-5 h-5" /></button>
-                <button onClick={handleEngineeringAccess} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAuthorized ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{isAuthorized ? <BrainCircuit className="w-4 h-4" /> : <Lock className="w-4 h-4" />}{isAuthorized ? 'Ingeniería' : 'Acceso'}</button>
+                <button onClick={handleEngineeringAccess} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAuthorized ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'}`}>{isAuthorized ? <BrainCircuit className="w-4 h-4" /> : <Lock className="w-4 h-4" />}</button>
             </div>
         </div>
       </div>
 
-      {/* --- VISTA: MÉTRICAS + OCIO --- */}
+      {/* ================================================================================== */}
+      {/* PESTAÑA 1: MÉTRICAS ORIGINALES (RESTORED) */}
+      {/* ================================================================================== */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* KPI CARDS (Resumidas) */}
+            {/* KPI CARDS CON EDITOR DE META (VUELVE EL LÁPIZ) */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Producción (u)</p><p className="text-3xl font-bold text-slate-800 mt-2">{filteredLogs.reduce((sum, log) => sum + log.quantity, 0).toLocaleString()}</p></div>
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Puntos Reales</p><p className="text-3xl font-bold text-blue-600 mt-2">{filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0).toLocaleString('es-AR', {maximumFractionDigits:0})}</p></div>
-                
-                {/* CONFIGURADOR DE CAPACIDAD RAPIDA */}
-                <div className="bg-indigo-50 p-4 rounded-xl shadow-sm border border-indigo-100 md:col-span-2 flex flex-col justify-center">
-                    <div className="flex items-center gap-2 mb-2"><Clock className="w-4 h-4 text-indigo-600"/><span className="text-xs font-bold text-indigo-800 uppercase">Configurar Capacidad del Periodo</span></div>
-                    <div className="flex gap-4">
-                        <div><label className="text-[10px] text-indigo-500 font-bold block">DÍAS HÁBILES</label><input type="number" value={workingDays} onChange={e => setWorkingDays(Number(e.target.value))} className="w-20 bg-white border border-indigo-200 rounded px-2 py-1 text-sm font-bold text-indigo-900"/></div>
-                        <div><label className="text-[10px] text-indigo-500 font-bold block">HORAS JORNADA</label><input type="number" value={shiftHours} onChange={e => setShiftHours(Number(e.target.value))} className="w-20 bg-white border border-indigo-200 rounded px-2 py-1 text-sm font-bold text-indigo-900"/></div>
-                        <div><label className="text-[10px] text-indigo-500 font-bold block">BASE PTS/HR</label><input type="number" value={pointsPerHour} onChange={e => setPointsPerHour(Number(e.target.value))} className="w-20 bg-white border border-indigo-200 rounded px-2 py-1 text-sm font-bold text-slate-500" disabled/></div>
+                <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
+                    <div className="flex justify-between items-start mb-2">
+                        <p className="text-slate-400 text-xs font-bold uppercase tracking-wider flex items-center gap-2"><Target className="w-4 h-4 text-amber-500" /> Meta Diaria</p>
+                        {!isEditingTarget ? <button onClick={() => setIsEditingTarget(true)}><Pencil className="w-4 h-4 text-slate-400 hover:text-white" /></button> : <button onClick={handleSaveTarget}><Save className="w-4 h-4 text-emerald-400" /></button>}
                     </div>
+                    {isEditingTarget ? <input type="number" value={tempTarget} onChange={(e) => setTempTarget(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xl font-bold w-full text-white" autoFocus /> : <p className="text-3xl font-black mt-1 tracking-tight">{dailyTarget.toLocaleString()} <span className="text-sm font-normal text-slate-400">pts</span></p>}
                 </div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Producción (u)</p><p className="text-3xl font-bold text-slate-800 mt-2">{filteredLogs.reduce((sum, log) => sum + log.quantity, 0).toLocaleString()}</p></div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Puntos Totales</p><p className="text-3xl font-bold text-blue-600 mt-2">{filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0).toLocaleString('es-AR', {maximumFractionDigits:0})}</p></div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Registros</p><p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p></div>
             </div>
 
+            {/* GRÁFICOS ORIGINALES */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* TABLA DE EFICIENCIA Y OCIO (REEMPLAZA AL RANKING SIMPLE) */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col h-[500px]">
+                {/* RANKING SIMPLE (SIN COLUMNAS RARAS) */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
                     <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-md font-bold text-slate-800 flex items-center gap-2"><Activity className="w-5 h-5 text-indigo-600" /> Eficiencia & Ocio Laboral</h3>
+                        <h3 className="text-md font-bold text-slate-800 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> Ranking</h3>
                         <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
                             <Filter className="w-3 h-3 text-slate-500"/>
-                            <select value={rankingFilter} onChange={(e) => setRankingFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
-                                <option value="Global">Global</option>
-                                <option disabled>──────</option>
-                                {Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
+                            <select value={rankingFilter} onChange={(e) => setRankingFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"><option value="Global">Global</option><option disabled>──────</option>{Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}</select>
                         </div>
                     </div>
-                    
-                    <div className="overflow-auto flex-1 border rounded-lg">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-slate-50 text-xs text-slate-500 uppercase sticky top-0 z-10">
-                                <tr>
-                                    <th className="px-4 py-3">Operario</th>
-                                    <th className="px-4 py-3 text-right">Real (Pts)</th>
-                                    <th className="px-4 py-3 text-right text-indigo-600">Capacidad (Pts)</th>
-                                    <th className="px-4 py-3 text-right text-red-600">Ocio (Pts)</th>
-                                    <th className="px-4 py-3 text-center">% Ocio</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {rankingStats.map((stat, idx) => (
-                                    <tr key={stat.name} className="hover:bg-slate-50">
-                                        <td className="px-4 py-3 font-bold text-slate-700 flex items-center gap-2">
-                                            <span className={`text-[10px] w-5 h-5 flex items-center justify-center rounded-full text-white ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-300')}`}>{idx+1}</span>
-                                            {stat.name}
-                                        </td>
-                                        <td className="px-4 py-3 text-right font-medium">{stat.points.toLocaleString('es-AR')}</td>
-                                        <td className="px-4 py-3 text-right text-indigo-600 bg-indigo-50/30">{stat.potentialPoints.toLocaleString('es-AR')}</td>
-                                        <td className="px-4 py-3 text-right font-bold text-red-600 bg-red-50/30">{stat.idlePoints.toLocaleString('es-AR')}</td>
-                                        <td className="px-4 py-3 text-center">
-                                            {stat.idlePoints > 0 ? (
-                                                <span className={`px-2 py-1 rounded text-xs font-bold ${stat.idlePercentage > 20 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                                    {stat.idlePercentage.toFixed(1)}%
-                                                </span>
-                                            ) : (
-                                                <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">0% (Superávit)</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                                {rankingStats.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-slate-400">Sin datos</td></tr>}
-                            </tbody>
-                        </table>
+                    <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+                        {rankingStats.map((stat, idx) => (
+                        <div key={stat.name} className="bg-slate-50 p-3 rounded-lg border border-slate-100 relative overflow-hidden">
+                            {idx < 3 && <div className={`absolute top-0 right-0 p-1 px-2 text-[10px] font-bold text-white rounded-bl-lg ${idx===0?'bg-amber-400':(idx===1?'bg-slate-400':'bg-orange-400')}`}>#{idx+1}</div>}
+                            <div className="flex justify-between items-center mb-1"><span className="font-bold text-slate-700">{stat.name}</span><span className="text-sm font-bold text-slate-600">{stat.points.toFixed(0)} pts</span></div>
+                            <div className="w-full bg-slate-200 rounded-full h-2"><div className="h-full bg-amber-500" style={{ width: `${Math.min(stat.percentage, 100)}%` }}></div></div>
+                        </div>
+                        ))}
                     </div>
                 </div>
 
-                {/* GRAFICO TENDENCIA (PEQUEÑO) */}
-                <div id="chart-trend" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-[500px]">
-                    <h3 className="text-md font-semibold text-slate-700 mb-4">Evolución Diaria</h3>
-                    <ResponsiveContainer width="100%" height="90%">
-                        <LineChart data={dailyTrend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{fontSize: 10}} /><YAxis width={40} tick={{fontSize: 10}} /><Tooltip /><Legend wrapperStyle={{fontSize: '10px'}} /><Line type="monotone" dataKey="points" name="Pts" stroke="#2563eb" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="quantity" name="Uni" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" dot={false} /></LineChart>
+                {/* TENDENCIA */}
+                <div id="chart-trend" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-96 lg:col-span-2">
+                    <h3 className="text-md font-semibold text-slate-700 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-blue-600"/> Evolución Diaria</h3>
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={dailyTrend}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{fontSize: 12}} /><YAxis /><Tooltip /><Legend /><Line type="monotone" dataKey="points" name="Puntos" stroke="#2563eb" strokeWidth={3} dot={{r: 4}} /><Line type="monotone" dataKey="quantity" name="Unidades" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" /></LineChart>
                     </ResponsiveContainer>
                 </div>
             </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6">
+                <div id="chart-sector" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
+                    <h3 className="text-md font-bold text-slate-700 mb-4">Producción por Sector</h3>
+                    <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={countBySector} cx="50%" cy="50%" innerRadius={60} outerRadius={80} fill="#8884d8" paddingAngle={5} dataKey="value">{countBySector.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer>
+                </div>
+                <div id="chart-models" className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-80">
+                    <h3 className="text-md font-semibold text-slate-700 mb-4">Top 5 Modelos</h3>
+                    <ResponsiveContainer width="100%" height="100%"><BarChart data={modelStats} layout="vertical"><CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false}/><XAxis type="number" hide /><YAxis dataKey="name" type="category" width={80} tick={{fontSize: 11}} /><Tooltip /><Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} name="Unidades" /></BarChart></ResponsiveContainer>
+                </div>
+            </div>
             
-            <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-200 text-xs text-indigo-800 flex gap-4 items-center">
-                <AlertOctagon className="w-5 h-5 text-indigo-600"/>
-                <p><strong>Fórmula de Ocio:</strong> (Días Trab. × Horas × 3600) - Puntos Reales. <br/>Un porcentaje alto indica tiempo improductivo, falta de carga de datos o problemas de línea.</p>
+            {/* HISTORIAL SIMPLE */}
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-8">
+                <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
+                <div className="overflow-x-auto max-h-96">
+                    <table className="w-full text-sm text-left text-slate-600">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0"><tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Pts</th></tr></thead>
+                        <tbody>{filteredLogs.slice(0, 50).map(log => (<tr key={log.id} className="border-b hover:bg-slate-50"><td className="px-6 py-4">{new Date(log.timestamp).toLocaleDateString()}</td><td className="px-6 py-4 font-bold">{log.operatorName}</td><td className="px-6 py-4">{log.model}</td><td className="px-6 py-4 text-right font-bold text-blue-600">{log.totalPoints.toFixed(1)}</td></tr>))}</tbody>
+                    </table>
+                </div>
             </div>
         </div>
       )}
 
-      {/* --- VISTA: AUDITORÍA (STOCK) --- */}
+      {/* ================================================================================== */}
+      {/* PESTAÑA 2: EFICIENCIA Y OCIO (LO NUEVO) */}
+      {/* ================================================================================== */}
+      {activeTab === 'efficiency' && (
+         <div className="animate-in fade-in space-y-6">
+            <div className="bg-indigo-50 p-6 rounded-xl shadow-md border-l-4 border-indigo-600">
+                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Timer className="w-6 h-6 text-indigo-600"/> Calculadora de Capacidad</h3>
+                <p className="text-slate-600 text-sm mt-1 mb-4">Defina los parámetros del periodo para calcular el tiempo ocioso y la eficiencia real de la planta.</p>
+                
+                <div className="flex flex-wrap gap-6 bg-white p-4 rounded-lg shadow-sm border border-indigo-100">
+                     <div><label className="text-[10px] text-indigo-500 font-bold block mb-1">DÍAS HÁBILES</label><input type="number" value={workingDays} onChange={e => setWorkingDays(Number(e.target.value))} className="w-24 bg-slate-50 border border-slate-300 rounded px-3 py-2 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"/></div>
+                     <div><label className="text-[10px] text-indigo-500 font-bold block mb-1">HORAS TURNO</label><input type="number" value={shiftHours} onChange={e => setShiftHours(Number(e.target.value))} className="w-24 bg-slate-50 border border-slate-300 rounded px-3 py-2 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"/></div>
+                     <div className="flex flex-col justify-end pb-2"><span className="text-xs text-slate-400 font-medium">x 3600 pts/hora =</span></div>
+                     <div><label className="text-[10px] text-slate-400 font-bold block mb-1">CAPACIDAD IDEAL</label><div className="bg-indigo-100 px-4 py-2 rounded text-lg font-black text-indigo-700 border border-indigo-200">{(workingDays * shiftHours * pointsPerHour).toLocaleString()} pts</div></div>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                 <div className="px-6 py-4 border-b border-slate-100"><h3 className="font-bold text-slate-700">Reporte de Ocio por Operario</h3></div>
+                 <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-xs text-slate-500 uppercase sticky top-0">
+                            <tr>
+                                <th className="px-6 py-4">Operario</th>
+                                <th className="px-6 py-4 text-right">Prod. Real</th>
+                                <th className="px-6 py-4 text-right text-indigo-600">Capacidad</th>
+                                <th className="px-6 py-4 text-right text-red-600 bg-red-50/50">Pts Ociosos</th>
+                                <th className="px-6 py-4 text-center bg-red-50/50">% Ocio</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {rankingStats.map((stat, idx) => (
+                                <tr key={stat.name} className="hover:bg-slate-50">
+                                    <td className="px-6 py-4 font-bold text-slate-700 flex items-center gap-2">
+                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] text-white ${idx<3 ? 'bg-indigo-500' : 'bg-slate-400'}`}>{idx+1}</div>
+                                        {stat.name}
+                                    </td>
+                                    <td className="px-6 py-4 text-right font-medium">{stat.points.toLocaleString('es-AR')}</td>
+                                    <td className="px-6 py-4 text-right text-indigo-600 bg-indigo-50/30 font-mono">{stat.potentialPoints.toLocaleString('es-AR')}</td>
+                                    <td className="px-6 py-4 text-right font-bold text-red-600 bg-red-50/30">{stat.idlePoints.toLocaleString('es-AR')}</td>
+                                    <td className="px-6 py-4 text-center bg-red-50/30">
+                                        {stat.idlePoints > 0 ? (
+                                            <span className={`px-2 py-1 rounded text-xs font-bold border ${stat.idlePercentage > 20 ? 'bg-red-100 text-red-700 border-red-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'}`}>{stat.idlePercentage.toFixed(1)}%</span>
+                                        ) : <span className="text-green-600 text-xs font-bold">Superávit</span>}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                 </div>
+            </div>
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex gap-3 items-center text-xs text-slate-600">
+                <AlertOctagon className="w-5 h-5 text-slate-400"/>
+                <p>El "Tiempo Ocioso" se calcula restando la producción real a la capacidad teórica del operario en el periodo seleccionado.</p>
+            </div>
+         </div>
+      )}
+
+      {/* ================================================================================== */}
+      {/* PESTAÑA 3: AUDITORÍA (STOCK) */}
+      {/* ================================================================================== */}
       {activeTab === 'audit' && (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
                 <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Scale className="w-6 h-6 text-red-600"/> Conciliación vs. Tango / Stock</h3>
-                <p className="text-slate-500 text-sm mt-1">Comparativa entre producción declarada y stock ingresado.</p>
+                <p className="text-slate-500 text-sm mt-1">Comparativa entre producción declarada y stock real.</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                 <div className="overflow-x-auto">
@@ -338,7 +384,7 @@ export const ManagerDashboard: React.FC = () => {
                             <tr><th className="px-6 py-4">Modelo</th><th className="px-6 py-4 text-right bg-blue-50/50">Valor Std</th><th className="px-6 py-4 text-right bg-blue-50/50">Declarado</th><th className="px-6 py-4 text-center bg-red-50/50 w-48">Cant. Real (Tango)</th><th className="px-6 py-4 text-right bg-red-50/50">Teórico</th><th className="px-6 py-4 text-right">Desvío</th><th className="px-6 py-4 text-center">Estado</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {auditData.map((row) => (
+                            {getAuditData().map((row) => (
                                 <tr key={row.model} className="hover:bg-slate-50">
                                     <td className="px-6 py-4 font-bold text-slate-800">{row.model}</td>
                                     <td className="px-6 py-4 text-right font-mono text-slate-600 bg-blue-50/30">{row.standardValue.toFixed(1)}</td>
@@ -349,7 +395,7 @@ export const ManagerDashboard: React.FC = () => {
                                     <td className="px-6 py-4 text-center">{Math.abs(row.deviationPct) < 5 ? <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold border border-green-200">OK</span> : <span className={`px-2 py-1 rounded text-xs font-bold border ${row.difference > 0 ? 'bg-red-100 text-red-700 border-red-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200'}`}>{row.difference > 0 ? 'Exceso' : 'Faltante'} ({Math.abs(row.deviationPct).toFixed(0)}%)</span>}</td>
                                 </tr>
                             ))}
-                            {auditData.length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-400">Sin datos.</td></tr>}
+                            {getAuditData().length === 0 && <tr><td colSpan={7} className="text-center py-10 text-slate-400">Sin datos.</td></tr>}
                         </tbody>
                     </table>
                 </div>
