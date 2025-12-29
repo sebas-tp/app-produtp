@@ -463,7 +463,7 @@ export const ManagerDashboard: React.FC = () => {
       {/* PESTAÑA 1: MÉTRICAS */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* KPI CARDS */}
+            {/* KPI CARDS REDISEÑADAS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
@@ -687,9 +687,10 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 4: CONTABILIDAD */}
+      {/* PESTAÑA 4: CONTABILIDAD (NUEVO DRILL-DOWN) */}
       {activeTab === 'accounting' && (
         <div className="animate-in fade-in space-y-6">
+            {/* KPI Cards Contables */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-slate-400">
                     <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Briefcase className="w-4 h-4"/> Capacidad Instalada (Total)</p>
@@ -790,7 +791,7 @@ export const ManagerDashboard: React.FC = () => {
                         <label className="text-[10px] text-orange-500 font-bold block mb-1">MODELO A FABRICAR</label>
                         <select className="w-full border border-slate-300 rounded px-3 py-2 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-orange-500" value={simModel} onChange={e => setSimModel(e.target.value)}>
                             <option value="">-- Seleccionar --</option>
-                            {uniqueModels.map(m => <option key={m} value={m}>{m}</option>)}
+                            {Array.from(new Set(matrix.map(m => m.model))).sort().map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
                      </div>
                      <div className="w-32">
@@ -812,22 +813,17 @@ export const ManagerDashboard: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {getEfficiencyData() /* Dummy call to ensure logic loaded */ } 
-                            {/* NOTE: We call the simulation function directly here */}
                             {(() => {
-                                const simData = (() => {
-                                    // REPEAT LOGIC LOCALLY FOR RENDER
-                                    const rules = matrix.filter(r => r.model === simModel);
-                                    const loadPerSector: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0 };
-                                    rules.forEach(r => {
-                                        const cc = normalizeCostCenter(r.sector);
-                                        if (loadPerSector[cc] !== undefined) loadPerSector[cc] += (r.pointsPerUnit * simQty);
-                                    });
-                                    const singlePersonCapacity = shiftHours * pointsPerHour;
-                                    return Object.entries(loadPerSector).map(([sector, points]) => ({
-                                        sector, points, people: points / singlePersonCapacity
-                                    }));
-                                })();
+                                const rules = matrix.filter(r => r.model === simModel);
+                                const loadPerSector: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0 };
+                                rules.forEach(r => {
+                                    const cc = normalizeCostCenter(r.sector);
+                                    if (loadPerSector[cc] !== undefined) loadPerSector[cc] += (r.pointsPerUnit * simQty);
+                                });
+                                const singlePersonCapacity = shiftHours * pointsPerHour;
+                                const simData = Object.entries(loadPerSector).map(([sector, points]) => ({
+                                    sector, points, people: points / singlePersonCapacity
+                                }));
 
                                 return simData.map((row) => (
                                     <tr key={row.sector} className="hover:bg-slate-50">
