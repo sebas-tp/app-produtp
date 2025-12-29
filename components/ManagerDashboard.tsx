@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info, Search, Zap
+  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info, Search, Zap, AlertTriangle
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -56,6 +56,10 @@ export const ManagerDashboard: React.FC = () => {
   // --- INPUTS SIMULADOR (NUEVO) ---
   const [simModel, setSimModel] = useState<string>('');
   const [simQty, setSimQty] = useState<number>(100);
+  // Recursos disponibles (Máquinas/Mesas) por defecto
+  const [simResources, setSimResources] = useState<Record<string, number>>({
+      'CORTE': 2, 'COSTURA': 5, 'ARMADO': 4, 'EMBALAJE': 2
+  });
 
   // --- ESTADO PARA ACORDEÓN CONTABLE ---
   const [expandedSector, setExpandedSector] = useState<string | null>(null);
@@ -263,14 +267,11 @@ export const ManagerDashboard: React.FC = () => {
     return reportData;
   };
 
-  // --- CÁLCULOS 5: SIMULADOR (NUEVO) ---
+  // --- CÁLCULOS 5: SIMULADOR (ACTUALIZADO) ---
   const getSimulationData = () => {
     if (!simModel || simQty <= 0) return [];
     
-    // 1. Obtener reglas del modelo
     const rules = matrix.filter(r => r.model === simModel);
-    
-    // 2. Agrupar puntos por sector normalizado
     const loadPerSector: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0 };
     
     rules.forEach(r => {
@@ -280,14 +281,28 @@ export const ManagerDashboard: React.FC = () => {
         }
     });
 
-    // 3. Calcular personas necesarias (Capacidad de 1 persona = shiftHours * pointsPerHour)
-    const singlePersonCapacity = shiftHours * pointsPerHour;
+    // AQUI ESTA LA CLAVE: USAMOS EL "DAILY TARGET" COMO CAPACIDAD DE 1 PERSONA
+    // 24960 puntos es lo que se le exige a una persona por día.
+    const singlePersonCapacity = dailyTarget;
 
-    return Object.entries(loadPerSector).map(([sector, points]) => ({
-        sector,
-        pointsRequired: points,
-        peopleNeeded: points / singlePersonCapacity
-    }));
+    return Object.entries(loadPerSector).map(([sector, points]) => {
+        const peopleNeeded = points / singlePersonCapacity;
+        // Obtenemos los recursos disponibles (input manual)
+        const availableResources = simResources[sector] || 0;
+        // Calculamos si hay déficit de maquinaria (gente necesaria > maquinas)
+        // Redondeamos gente hacia arriba (no podes tener 1.5 personas)
+        const peopleRounded = Math.ceil(peopleNeeded);
+        const isBottleneck = peopleRounded > availableResources;
+
+        return {
+            sector,
+            pointsRequired: points,
+            peopleNeeded,
+            peopleRounded,
+            availableResources,
+            isBottleneck
+        };
+    });
   };
 
   // --- VARIABLES DE CÁLCULO ---
@@ -348,8 +363,8 @@ export const ManagerDashboard: React.FC = () => {
         const rows = accountingData.map(d => [d.center, d.headcount, d.capacity, d.real, d.productivity.toFixed(2) + '%']);
         generateGenericCSV(["Centro Costo", "Operarios", "Capacidad", "Real (Tango)", "Productividad"], rows, `Reporte_Contable_${startDate}`);
     } else if (activeTab === 'simulator') {
-        const rows = simulationData.map(d => [d.sector, d.pointsRequired, d.peopleNeeded.toFixed(2)]);
-        generateGenericCSV(["Sector", "Carga Puntos", "Personas Necesarias"], rows, `Simulacion_${simModel}_${simQty}`);
+        const rows = simulationData.map(d => [d.sector, d.pointsRequired, d.peopleRounded, d.availableResources, d.isBottleneck ? 'FALTA MAQUINA' : 'OK']);
+        generateGenericCSV(["Sector", "Carga Puntos", "Personas Necesarias", "Recursos Disponibles", "Estado"], rows, `Simulacion_${simModel}_${simQty}`);
     }
   };
 
@@ -386,12 +401,21 @@ export const ManagerDashboard: React.FC = () => {
         });
     } else if (activeTab === 'simulator') {
         doc.text(`SIMULACIÓN DE DOTACIÓN: Modelo ${simModel} (${simQty} u.)`, 14, 45);
+        doc.text(`Capacidad Base: ${dailyTarget.toLocaleString()} pts/persona`, 14, 52);
         autoTable(doc, {
-            startY: 55,
-            head: [['Centro de Costo', 'Carga (Pts)', 'Personas Sugeridas']],
-            body: simulationData.map(r => [r.sector, r.pointsRequired.toLocaleString(), r.peopleNeeded.toFixed(2)]),
+            startY: 60,
+            head: [['Centro de Costo', 'Carga (Pts)', 'Personas Necesarias', 'Recursos Disp.', 'Estado']],
+            body: simulationData.map(r => [
+                r.sector, 
+                r.pointsRequired.toLocaleString(), 
+                `${r.peopleRounded} (${r.peopleNeeded.toFixed(2)})`,
+                r.availableResources,
+                r.isBottleneck ? 'FALTA MAQ.' : 'OK'
+            ]),
             theme: 'grid',
-            headStyles: { fillColor: [249, 115, 22] } // Orange
+            headStyles: { fillColor: [249, 115, 22] },
+            bodyStyles: { textColor: [0, 0, 0] },
+            columnStyles: { 4: { fontStyle: 'bold' } }
         });
     } else {
         doc.text("Resumen de Métricas Generales", 14, 45);
@@ -779,12 +803,12 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 5: SIMULADOR (NUEVA) */}
+      {/* PESTAÑA 5: SIMULADOR (ACTUALIZADA CON RESTRICCIONES) */}
       {activeTab === 'simulator' && (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-orange-50 p-6 rounded-xl shadow-md border-l-4 border-orange-600">
                 <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Zap className="w-6 h-6 text-orange-600"/> Simulador de Dotación</h3>
-                <p className="text-slate-600 text-sm mt-1 mb-4">Calcula el personal necesario para cumplir con un objetivo de producción específico.</p>
+                <p className="text-slate-600 text-sm mt-1 mb-4">Calcula el personal y verifica la disponibilidad de máquinas.</p>
                 
                 <div className="flex flex-wrap gap-4 bg-white p-4 rounded-lg shadow-sm border border-orange-100 items-end">
                      <div className="flex-1 min-w-[200px]">
@@ -798,7 +822,25 @@ export const ManagerDashboard: React.FC = () => {
                         <label className="text-[10px] text-orange-500 font-bold block mb-1">CANTIDAD (u.)</label>
                         <input type="number" className="w-full border border-slate-300 rounded px-3 py-2 text-slate-800 font-black text-center outline-none focus:ring-2 focus:ring-orange-500" value={simQty} onChange={e => setSimQty(Number(e.target.value))}/>
                      </div>
-                     <div className="pb-2 text-sm text-slate-400 font-medium">Base cálculo: 1 persona = {(shiftHours * pointsPerHour).toLocaleString()} pts/día</div>
+                     <div className="pb-2 text-sm text-slate-400 font-medium">Base cálculo: 1 persona = {dailyTarget.toLocaleString()} pts/día</div>
+                </div>
+            </div>
+
+            {/* PANEL DE RECURSOS (MÁQUINAS) */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Recursos Disponibles (Máquinas/Mesas)</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {['CORTE', 'COSTURA', 'ARMADO', 'EMBALAJE'].map(sector => (
+                        <div key={sector} className="flex items-center gap-2 bg-slate-50 p-2 rounded border border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-500 w-16">{sector}</span>
+                            <input 
+                                type="number" 
+                                className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-center font-bold text-slate-700 outline-none focus:ring-1 focus:ring-orange-500"
+                                value={simResources[sector] || 0}
+                                onChange={(e) => setSimResources({...simResources, [sector]: Number(e.target.value)})}
+                            />
+                        </div>
+                    ))}
                 </div>
             </div>
 
@@ -808,8 +850,10 @@ export const ManagerDashboard: React.FC = () => {
                         <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
                             <tr>
                                 <th className="px-6 py-4">Centro de Costo</th>
-                                <th className="px-6 py-4 text-right">Carga de Trabajo (Pts)</th>
-                                <th className="px-6 py-4 text-center font-bold bg-orange-50 text-orange-700">Personas Necesarias</th>
+                                <th className="px-6 py-4 text-right">Carga (Pts)</th>
+                                <th className="px-6 py-4 text-center">Gente Necesaria</th>
+                                <th className="px-6 py-4 text-center">Maq. Disp.</th>
+                                <th className="px-6 py-4 text-center font-bold">Estado</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -820,21 +864,33 @@ export const ManagerDashboard: React.FC = () => {
                                     const cc = normalizeCostCenter(r.sector);
                                     if (loadPerSector[cc] !== undefined) loadPerSector[cc] += (r.pointsPerUnit * simQty);
                                 });
-                                const singlePersonCapacity = shiftHours * pointsPerHour;
-                                const simData = Object.entries(loadPerSector).map(([sector, points]) => ({
-                                    sector, points, people: points / singlePersonCapacity
-                                }));
+                                const singlePersonCapacity = dailyTarget; // USAMOS LA META DIARIA
+                                
+                                return Object.entries(loadPerSector).map(([sector, points]) => {
+                                    const peopleNeeded = points / singlePersonCapacity;
+                                    const peopleRounded = Math.ceil(peopleNeeded);
+                                    const available = simResources[sector] || 0;
+                                    const isBottleneck = peopleRounded > available;
 
-                                return simData.map((row) => (
-                                    <tr key={row.sector} className="hover:bg-slate-50">
-                                        <td className="px-6 py-4 font-bold text-slate-800">{row.sector}</td>
-                                        <td className="px-6 py-4 text-right font-mono text-slate-600">{row.points.toLocaleString('es-AR')}</td>
-                                        <td className="px-6 py-4 text-center bg-orange-50">
-                                            <span className="text-xl font-black text-orange-600">{Math.ceil(row.people)}</span>
-                                            <span className="text-xs text-orange-400 ml-2">({row.people.toFixed(2)})</span>
+                                    return (
+                                    <tr key={sector} className="hover:bg-slate-50">
+                                        <td className="px-6 py-4 font-bold text-slate-800">{sector}</td>
+                                        <td className="px-6 py-4 text-right font-mono text-slate-600">{points.toLocaleString('es-AR')}</td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="text-xl font-black text-slate-700">{peopleRounded}</span>
+                                            <span className="text-xs text-slate-400 ml-2">({peopleNeeded.toFixed(1)})</span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{available}</td>
+                                        <td className="px-6 py-4 text-center">
+                                            {isBottleneck ? (
+                                                <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200 flex items-center justify-center gap-1"><AlertTriangle className="w-3 h-3"/> FALTA MAQ</span>
+                                            ) : (
+                                                <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold border border-green-200">OK</span>
+                                            )}
                                         </td>
                                     </tr>
-                                ));
+                                    );
+                                });
                             })()}
                         </tbody>
                     </table>
