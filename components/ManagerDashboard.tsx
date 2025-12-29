@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator // <--- NUEVOS ICONOS
+  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,7 +26,7 @@ export const ManagerDashboard: React.FC = () => {
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // --- NAVEGACIÓN (AHORA 4 PESTAÑAS) ---
+  // --- NAVEGACIÓN ---
   const [activeTab, setActiveTab] = useState<'metrics' | 'efficiency' | 'audit' | 'accounting'>('metrics');
 
   const [startDate, setStartDate] = useState(() => {
@@ -51,6 +51,9 @@ export const ManagerDashboard: React.FC = () => {
   
   // --- INPUTS TANGO (AUDITORÍA) ---
   const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({});
+
+  // --- ESTADO PARA ACORDEÓN CONTABLE (NUEVO) ---
+  const [expandedSector, setExpandedSector] = useState<string | null>(null);
 
   // --- SEGURIDAD ---
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -135,8 +138,6 @@ export const ManagerDashboard: React.FC = () => {
             acc[log.operatorName] = { name: log.operatorName, sector: log.sector || 'General', points: 0 };
         }
         acc[log.operatorName].points += log.totalPoints;
-        // Lógica de sector dominante: Simplemente tomamos el último registrado o predominante
-        // Para más precisión, en un sistema real se contaría cuál sector aparece más veces.
         return acc;
     }, {} as Record<string, { name: string; sector: string; points: number }>));
 
@@ -182,89 +183,88 @@ export const ManagerDashboard: React.FC = () => {
     }).sort((a, b) => b.declaredPoints - a.declaredPoints);
   };
 
-  // --- CÁLCULOS 4: CONTABILIDAD (NUEVO) ---
+  // --- CÁLCULOS 4: CONTABILIDAD (CENTROS DE COSTO) ---
   const getAccountingData = () => {
-    // A. Detectar Sector de cada Operario (Basado en dónde produjeron más)
-    const operatorSectorMap: Record<string, string> = {};
-    const opPointsPerSector: Record<string, Record<string, number>> = {};
+    // 1. Normalizador de Centros de Costo
+    const normalizeCostCenter = (sectorName: string) => {
+        const s = sectorName.toUpperCase();
+        if (s.includes('CORTE')) return 'CORTE';
+        if (s.includes('COSTURA')) return 'COSTURA';
+        if (s.includes('ARMADO') || s.includes('APARADO')) return 'ARMADO';
+        if (s.includes('EMBALAJE') || s.includes('LIMPIEZA') || s.includes('EMPAQUE')) return 'EMBALAJE';
+        return 'OTROS';
+    };
+
+    // 2. Agrupar Operarios por Centro de Costo (Basado en donde produjeron más)
+    const opSectorMap: Record<string, string> = {};
+    const opPoints: Record<string, number> = {};
+    const opPointsPerRawSector: Record<string, Record<string, number>> = {};
 
     filteredLogs.forEach(log => {
-        if (!opPointsPerSector[log.operatorName]) opPointsPerSector[log.operatorName] = {};
-        if (!opPointsPerSector[log.operatorName][log.sector]) opPointsPerSector[log.operatorName][log.sector] = 0;
-        opPointsPerSector[log.operatorName][log.sector] += log.totalPoints;
+        if (!opPointsPerRawSector[log.operatorName]) opPointsPerRawSector[log.operatorName] = {};
+        if (!opPointsPerRawSector[log.operatorName][log.sector]) opPointsPerRawSector[log.operatorName][log.sector] = 0;
+        opPointsPerRawSector[log.operatorName][log.sector] += log.totalPoints;
+        
+        if (!opPoints[log.operatorName]) opPoints[log.operatorName] = 0;
+        opPoints[log.operatorName] += log.totalPoints;
     });
 
-    Object.keys(opPointsPerSector).forEach(op => {
-        // Encontrar sector con más puntos
-        const sectors = opPointsPerSector[op];
-        const bestSector = Object.keys(sectors).reduce((a, b) => sectors[a] > sectors[b] ? a : b);
-        operatorSectorMap[op] = bestSector;
+    Object.keys(opPointsPerRawSector).forEach(op => {
+        const sectors = opPointsPerRawSector[op];
+        // Buscar el sector predominante
+        const bestRawSector = Object.keys(sectors).reduce((a, b) => sectors[a] > sectors[b] ? a : b);
+        opSectorMap[op] = normalizeCostCenter(bestRawSector);
     });
 
-    // B. Calcular Capacidad Instalada por Centro de Costo (Sector)
-    const sectorCapacity: Record<string, { capacity: number, headcount: number }> = {};
+    // 3. Calcular Producción Real por Centro de Costo (Desde Tango)
+    const sectorRealProd: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0, 'OTROS':0 };
     
-    // Obtenemos la lista de operarios únicos del periodo y sus días trabajados
-    Object.keys(operatorSectorMap).forEach(op => {
-        const sector = operatorSectorMap[op];
-        const days = customDays[op] !== undefined ? customDays[op] : globalDays;
-        const capacity = days * shiftHours * pointsPerHour;
-
-        if (!sectorCapacity[sector]) sectorCapacity[sector] = { capacity: 0, headcount: 0 };
-        sectorCapacity[sector].capacity += capacity;
-        sectorCapacity[sector].headcount += 1;
-    });
-
-    // C. Calcular Producción Real Validada (Tango) distribuida por Sector
-    const sectorRealProd: Record<string, number> = {};
-    
-    // Recorremos los inputs de Tango (Modelos y Cantidades)
     Object.keys(tangoInputs).forEach(model => {
         const qty = parseInt(tangoInputs[model] || '0');
         if (qty > 0) {
-            // Buscamos en la matriz cómo se compone ese modelo
             const rules = matrix.filter(r => r.model === model);
             rules.forEach(rule => {
-                const sector = rule.sector;
-                const points = rule.pointsPerUnit * qty;
-                
-                if (!sectorRealProd[sector]) sectorRealProd[sector] = 0;
-                sectorRealProd[sector] += points;
+                const cc = normalizeCostCenter(rule.sector);
+                sectorRealProd[cc] += (rule.pointsPerUnit * qty);
             });
         }
     });
 
-    // D. Unificar todo en la tabla final
-    // Usamos los sectores definidos en el enum Sector o los que aparezcan
-    const allSectors = Array.from(new Set([...Object.keys(sectorCapacity), ...Object.keys(sectorRealProd)]));
+    // 4. Construir Estructura Final
+    const costCenters = ['CORTE', 'COSTURA', 'ARMADO', 'EMBALAJE'];
     
-    const accountingRows = allSectors.map(sector => {
-        const cap = sectorCapacity[sector]?.capacity || 0;
-        const real = sectorRealProd[sector] || 0;
-        const headcount = sectorCapacity[sector]?.headcount || 0;
-        const productivity = cap > 0 ? (real / cap) * 100 : 0;
+    const reportData = costCenters.map(cc => {
+        // Filtrar operarios de este centro
+        const operatorsInCC = Object.keys(opSectorMap).filter(op => opSectorMap[op] === cc);
+        
+        let totalCapacity = 0;
+        let totalDeclared = 0;
+        const operatorDetails = operatorsInCC.map(op => {
+            const days = customDays[op] !== undefined ? customDays[op] : globalDays;
+            const capacity = days * shiftHours * pointsPerHour;
+            const declared = opPoints[op] || 0;
+            
+            totalCapacity += capacity;
+            totalDeclared += declared;
+
+            return { name: op, capacity, declared, efficiency: capacity > 0 ? (declared/capacity)*100 : 0 };
+        });
+
+        const realProduction = sectorRealProd[cc] || 0;
+        const productivity = totalCapacity > 0 ? (realProduction / totalCapacity) * 100 : 0;
 
         return {
-            sector,
-            headcount,
-            capacity: cap,
-            realProduction: real,
-            productivity
+            center: cc,
+            headcount: operatorsInCC.length,
+            capacity: totalCapacity,
+            declared: totalDeclared,
+            real: realProduction,
+            productivity,
+            operators: operatorDetails
         };
     });
 
-    // Agregar Fila Total
-    const totalRow = accountingRows.reduce((acc, row) => ({
-        sector: 'TOTAL PLANTA',
-        headcount: acc.headcount + row.headcount,
-        capacity: acc.capacity + row.capacity,
-        realProduction: acc.realProduction + row.realProduction,
-        productivity: 0 // Se recalcula
-    }), { sector: 'TOTAL', headcount: 0, capacity: 0, realProduction: 0, productivity: 0 });
-    
-    totalRow.productivity = totalRow.capacity > 0 ? (totalRow.realProduction / totalRow.capacity) * 100 : 0;
-
-    return [...accountingRows, totalRow];
+    return reportData;
   };
 
   // --- VARIABLES DE CÁLCULO ---
@@ -272,10 +272,15 @@ export const ManagerDashboard: React.FC = () => {
   const efficiencyData = getEfficiencyData();
   const accountingData = getAccountingData();
 
-  // Para la tarjeta de Métricas (Real Tango)
+  // Para KPIs métricas
   const totalTangoPoints = auditData.reduce((sum, item) => sum + item.theoreticalPoints, 0);
   const totalDeclaredPoints = filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0);
   const globalDifference = totalDeclaredPoints - totalTangoPoints;
+
+  // Para KPIs Contables
+  const totalPlantCapacity = accountingData.reduce((sum, item) => sum + item.capacity, 0);
+  const totalPlantReal = accountingData.reduce((sum, item) => sum + item.real, 0);
+  const plantProductivity = totalPlantCapacity > 0 ? (totalPlantReal / totalPlantCapacity) * 100 : 0;
 
   // --- HANDLERS ---
   const handleSaveTarget = async () => {
@@ -305,15 +310,14 @@ export const ManagerDashboard: React.FC = () => {
     if (activeTab === 'metrics') {
         downloadCSV(filteredLogs, `Reporte_Metricas_${startDate}`);
     } else if (activeTab === 'efficiency') {
-        const data = getEfficiencyData(); // Usamos la función pura dependiendo de la vista
-        // Lógica simplificada para exportar lo que se ve
-        const rows = data.map((d: any) => [d.name, d.points.toFixed(2)]); // Simplificado para ejemplo
-        generateGenericCSV(["Nombre", "Puntos"], rows, `Reporte_Eficiencia_${startDate}`);
+        const data = getEfficiencyData(); 
+        const rows = data.map((d: any) => [d.name, d.daysWorked || '-', d.points.toFixed(2), d.potentialPoints.toFixed(2), d.difference.toFixed(2), d.isSurplus ? "Superavit" : "Deficit"]);
+        generateGenericCSV(["Nombre", "Dias Trab", "Pts Real", "Pts Potencial", "Diferencia", "Estado"], rows, `Reporte_Eficiencia_${startDate}`);
     } else if (activeTab === 'audit') {
         const rows = auditData.map(d => [d.model, d.tangoQty, d.difference]);
         generateGenericCSV(["Modelo", "Tango", "Desvio"], rows, `Reporte_Auditoria_${startDate}`);
     } else if (activeTab === 'accounting') {
-        const rows = accountingData.map(d => [d.sector, d.headcount, d.capacity, d.realProduction, d.productivity.toFixed(2) + '%']);
+        const rows = accountingData.map(d => [d.center, d.headcount, d.capacity, d.real, d.productivity.toFixed(2) + '%']);
         generateGenericCSV(["Centro Costo", "Operarios", "Capacidad", "Real (Tango)", "Productividad"], rows, `Reporte_Contable_${startDate}`);
     }
   };
@@ -321,39 +325,35 @@ export const ManagerDashboard: React.FC = () => {
   const handleSmartPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
-    doc.setFontSize(22); doc.text(`Informe Técnico`, 14, 20);
-    doc.setFontSize(10); doc.text(`TopSafe S.A. | ${startDate} al ${endDate}`, 14, 28);
+    doc.setFontSize(22); doc.setTextColor(30, 41, 59); doc.text(`Informe Técnico`, 14, 20);
+    doc.setFontSize(10); doc.setTextColor(100); doc.text(`TopSafe S.A. | ${new Date().toLocaleDateString()}`, 14, 28);
+    doc.text(`Período: ${startDate} al ${endDate}`, 14, 34);
 
     if (activeTab === 'audit') {
         doc.text("AUDITORÍA STOCK", 14, 45);
         autoTable(doc, { startY: 50, head: [['Modelo', 'Valor Std', 'Tango', 'Teórico', 'Declarado', 'Desvío', 'Estado']], body: auditData.map(d => [d.model, d.standardValue.toFixed(1), d.tangoQty, d.theoreticalPoints.toFixed(0), d.declaredPoints.toFixed(0), d.difference.toFixed(0), Math.abs(d.deviationPct)<5?"OK":"REV"]) });
     } else if (activeTab === 'efficiency') {
         doc.text("EFICIENCIA Y OCIO", 14, 45);
-        const data = efficiencyView === 'sector' ? getEfficiencyData() : getEfficiencyData(); // Simplificación
-        // Aquí iría la lógica completa de tabla PDF similar a la renderizada
-        doc.text("Ver dashboard para detalle interactivo.", 14, 55);
+        const data = getEfficiencyData();
+        if (efficiencyView === 'sector') {
+            autoTable(doc, { startY: 50, head: [['Sector', 'Real', 'Potencial', 'Diferencia', 'Rendimiento', 'Estado']], body: data.map((s:any) => [s.name, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.difference.toFixed(0), s.performancePct.toFixed(1) + '%', s.isSurplus ? 'Positivo' : 'Negativo']) });
+        } else {
+            autoTable(doc, { startY: 50, head: [['Operario', 'Días', 'Real', 'Potencial', 'Diferencia', 'Rendimiento']], body: data.map((s:any) => [s.name, s.daysWorked, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.difference.toFixed(0), s.performancePct.toFixed(1) + '%']) });
+        }
     } else if (activeTab === 'accounting') {
         doc.text("REPORTE DE PRODUCTIVIDAD (CONTABLE)", 14, 45);
-        doc.text("Comparativa: Capacidad Instalada vs. Producción Validada por Tango", 14, 52);
         autoTable(doc, {
-            startY: 60,
+            startY: 55,
             head: [['Centro de Costo', 'Cant. Op', 'Capacidad (Pts)', 'Prod. Real (Pts)', 'Productividad']],
-            body: accountingData.map(r => [
-                r.sector, 
-                r.sector === 'TOTAL PLANTA' ? '-' : r.headcount, 
-                r.capacity.toLocaleString('es-AR'), 
-                r.realProduction.toLocaleString('es-AR'), 
-                { content: r.productivity.toFixed(1) + '%', styles: { fontStyle: 'bold', textColor: r.productivity < 50 ? [220,38,38] : [22,163,74] } }
-            ]),
+            body: accountingData.map(r => [r.center, r.headcount, r.capacity.toLocaleString('es-AR'), r.real.toLocaleString('es-AR'), r.productivity.toFixed(1) + '%']),
             theme: 'grid',
-            headStyles: { fillColor: [79, 70, 229] } // Indigo
+            headStyles: { fillColor: [22, 163, 74] } 
         });
-        doc.text("* La 'Prod. Real' se calcula distribuyendo los ingresos de Tango según la Matriz de Puntos.", 14, (doc as any).lastAutoTable.finalY + 10);
     } else {
-        doc.text("Métricas Generales", 14, 45);
+        doc.text("Resumen de Métricas Generales", 14, 45);
         autoTable(doc, { startY: 50, head: [['Fecha', 'Operario', 'Modelo', 'Cant', 'Pts', 'Obs']], body: filteredLogs.slice(0, 100).map(l => [new Date(l.timestamp).toLocaleDateString(), l.operatorName, l.model, l.quantity, l.totalPoints.toFixed(1), l.comments||'-']) });
     }
-    doc.save(`Reporte_${activeTab}.pdf`); setIsGeneratingPDF(false);
+    doc.save(`Reporte_${activeTab}_${startDate}.pdf`); setIsGeneratingPDF(false);
   };
 
   const handleFullEngineeringReport = async () => {
@@ -410,10 +410,9 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* PESTAÑA 1: MÉTRICAS */}
+      {/* 1. PESTAÑA MÉTRICAS */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* KPI CARDS REDISEÑADAS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
@@ -438,7 +437,6 @@ export const ManagerDashboard: React.FC = () => {
                 </div>
             </div>
 
-            {/* GRÁFICOS */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
                     <div className="flex justify-between items-center mb-4">
@@ -499,7 +497,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 2: EFICIENCIA */}
+      {/* 2. PESTAÑA EFICIENCIA */}
       {activeTab === 'efficiency' && (
          <div className="animate-in fade-in space-y-6">
             <div className="bg-indigo-50 p-6 rounded-xl shadow-md border-l-4 border-indigo-600">
@@ -544,7 +542,7 @@ export const ManagerDashboard: React.FC = () => {
                                     </td>
                                     {efficiencyView === 'operator' && (
                                         <td className="px-6 py-4 text-center">
-                                            <input type="number" className="w-16 text-center border border-slate-200 rounded bg-slate-50 font-bold text-slate-700" value={stat.daysWorked} onChange={(e) => setCustomDays({ ...customDays, [stat.name]: Number(e.target.value) })}/>
+                                            <input type="number" className="w-16 text-center border border-slate-200 rounded bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700" value={stat.daysWorked} onChange={(e) => setCustomDays({ ...customDays, [stat.name]: Number(e.target.value) })}/>
                                         </td>
                                     )}
                                     {efficiencyView === 'sector' && <td className="px-6 py-4 text-center font-mono text-slate-500">{stat.operatorsCount}</td>}
@@ -561,12 +559,12 @@ export const ManagerDashboard: React.FC = () => {
          </div>
       )}
 
-      {/* PESTAÑA 3: AUDITORÍA */}
+      {/* 3. PESTAÑA AUDITORÍA */}
       {activeTab === 'audit' && (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
                 <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Scale className="w-6 h-6 text-red-600"/> Conciliación vs. Tango / Stock</h3>
-                <p className="text-slate-500 text-sm mt-1">Carga aquí los ingresos de stock para validar la producción.</p>
+                <p className="text-slate-500 text-sm mt-1">Comparativa entre producción declarada y stock real.</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                 <div className="overflow-x-auto">
@@ -575,7 +573,7 @@ export const ManagerDashboard: React.FC = () => {
                             <tr><th className="px-6 py-4">Modelo</th><th className="px-6 py-4 text-right bg-blue-50/50">Valor Std</th><th className="px-6 py-4 text-right bg-blue-50/50">Declarado</th><th className="px-6 py-4 text-center bg-red-50/50 w-48">Cant. Real (Tango)</th><th className="px-6 py-4 text-right bg-red-50/50">Teórico</th><th className="px-6 py-4 text-right">Desvío</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {getAuditData().map((row) => (
+                            {auditData.map((row) => (
                                 <tr key={row.model} className="hover:bg-slate-50">
                                     <td className="px-6 py-4 font-bold text-slate-800">{row.model}</td>
                                     <td className="px-6 py-4 text-right font-mono text-slate-600 bg-blue-50/30">{row.standardValue.toFixed(1)}</td>
@@ -592,16 +590,28 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 4: CONTABILIDAD (NUEVO) */}
+      {/* 4. PESTAÑA CONTABILIDAD (NUEVA MEJORADA) */}
       {activeTab === 'accounting' && (
         <div className="animate-in fade-in space-y-6">
-            <div className="bg-emerald-50 p-6 rounded-xl shadow-md border-l-4 border-emerald-600">
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Briefcase className="w-6 h-6 text-emerald-600"/> Reporte de Productividad (Contable)</h3>
-                <p className="text-slate-600 text-sm mt-1">Comparativa de Capacidad Instalada vs. Producción Validada por Centro de Costo.</p>
-                <div className="mt-4 flex gap-4 text-xs">
-                    <div className="bg-white px-3 py-1 rounded border border-emerald-200 text-emerald-800 font-bold flex items-center gap-1"><Calculator className="w-3 h-3"/> Datos basados en Auditoría Tango</div>
-                    <div className="bg-white px-3 py-1 rounded border border-emerald-200 text-emerald-800 font-bold flex items-center gap-1"><Users className="w-3 h-3"/> Asignación automática de personal</div>
+            {/* KPI Cards Contables */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-slate-400">
+                    <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Briefcase className="w-4 h-4"/> Capacidad Instalada (Total)</p>
+                    <p className="text-2xl font-black text-slate-700 mt-2">{totalPlantCapacity.toLocaleString('es-AR')} <span className="text-xs font-medium text-slate-400">pts</span></p>
                 </div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-emerald-500">
+                    <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500"/> Producción Validada (Tango)</p>
+                    <p className="text-2xl font-black text-emerald-700 mt-2">{totalPlantReal.toLocaleString('es-AR')} <span className="text-xs font-medium text-slate-400">pts</span></p>
+                </div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-indigo-500">
+                    <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Activity className="w-4 h-4 text-indigo-500"/> Eficiencia Global</p>
+                    <p className="text-2xl font-black text-indigo-700 mt-2">{plantProductivity.toFixed(1)}%</p>
+                </div>
+            </div>
+
+            <div className="bg-emerald-50 p-6 rounded-xl shadow-md border-l-4 border-emerald-600">
+                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Calculator className="w-6 h-6 text-emerald-600"/> Reporte de Costos por Centro</h3>
+                <p className="text-slate-600 text-sm mt-1">Desglose de capacidad vs. producción real por Centro de Costo.</p>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -613,21 +623,58 @@ export const ManagerDashboard: React.FC = () => {
                             <th className="px-6 py-4 text-right text-slate-500">Capacidad (Pts)</th>
                             <th className="px-6 py-4 text-right text-emerald-700 bg-emerald-50/50">Prod. Real (Tango)</th>
                             <th className="px-6 py-4 text-right font-bold">Productividad</th>
+                            <th className="px-6 py-4 text-center">Detalle</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {getAccountingData().map((row, idx) => (
-                            <tr key={row.sector} className={row.sector.includes('TOTAL') ? "bg-slate-100 font-bold border-t-2 border-slate-300" : "hover:bg-slate-50"}>
-                                <td className="px-6 py-4 font-bold text-slate-800">{row.sector}</td>
-                                <td className="px-6 py-4 text-center">{row.sector.includes('TOTAL') ? '-' : row.headcount}</td>
-                                <td className="px-6 py-4 text-right text-slate-500 font-mono">{row.capacity.toLocaleString('es-AR')}</td>
-                                <td className="px-6 py-4 text-right text-emerald-700 bg-emerald-50/30 font-mono font-bold">{row.realProduction.toLocaleString('es-AR')}</td>
-                                <td className="px-6 py-4 text-right">
-                                    <span className={`px-2 py-1 rounded text-xs font-bold ${row.productivity < 50 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                        {row.productivity.toFixed(1)}%
-                                    </span>
-                                </td>
-                            </tr>
+                        {accountingData.map((row) => (
+                            <React.Fragment key={row.center}>
+                                <tr className="hover:bg-slate-50 cursor-pointer" onClick={() => setExpandedSector(expandedSector === row.center ? null : row.center)}>
+                                    <td className="px-6 py-4 font-bold text-slate-800 flex items-center gap-2">
+                                        <div className={`w-3 h-3 rounded-full ${row.productivity >= 80 ? 'bg-green-500' : (row.productivity >= 50 ? 'bg-yellow-500' : 'bg-red-500')}`}></div>
+                                        {row.center}
+                                    </td>
+                                    <td className="px-6 py-4 text-center font-bold text-slate-600">{row.headcount}</td>
+                                    <td className="px-6 py-4 text-right text-slate-500 font-mono">{row.capacity.toLocaleString('es-AR')}</td>
+                                    <td className="px-6 py-4 text-right text-emerald-700 bg-emerald-50/30 font-mono font-bold">{row.real.toLocaleString('es-AR')}</td>
+                                    <td className="px-6 py-4 text-right">
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${row.productivity < 50 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                            {row.productivity.toFixed(1)}%
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center text-slate-400">
+                                        {expandedSector === row.center ? <ChevronDown className="w-5 h-5 mx-auto"/> : <ChevronRight className="w-5 h-5 mx-auto"/>}
+                                    </td>
+                                </tr>
+                                {expandedSector === row.center && (
+                                    <tr>
+                                        <td colSpan={6} className="bg-slate-50 p-4 border-b border-slate-200 shadow-inner">
+                                            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                                                <table className="w-full text-xs">
+                                                    <thead className="bg-slate-100 text-slate-500 uppercase">
+                                                        <tr>
+                                                            <th className="px-4 py-2">Operario</th>
+                                                            <th className="px-4 py-2 text-right">Capacidad Indiv.</th>
+                                                            <th className="px-4 py-2 text-right">Declarado</th>
+                                                            <th className="px-4 py-2 text-right">Eficiencia Indiv.</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100">
+                                                        {row.operators.map(op => (
+                                                            <tr key={op.name}>
+                                                                <td className="px-4 py-2 font-medium text-slate-700">{op.name}</td>
+                                                                <td className="px-4 py-2 text-right text-slate-500">{op.capacity.toLocaleString()}</td>
+                                                                <td className="px-4 py-2 text-right text-blue-600">{op.declared.toLocaleString()}</td>
+                                                                <td className="px-4 py-2 text-right font-bold">{op.efficiency.toFixed(1)}%</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                            </React.Fragment>
                         ))}
                     </tbody>
                 </table>
@@ -635,7 +682,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODALES (Ingeniería y Auth) se mantienen igual */}
+      {/* MODALES se mantienen igual */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
