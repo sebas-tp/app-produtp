@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { 
   getLogs, clearLogs, downloadCSV, downloadPDF, 
   getProductivityTarget, saveProductivityTarget, getOperators,
-  getPointsMatrix // <--- 1. NUEVO IMPORT NECESARIO
+  getPointsMatrix 
 } from '../services/dataService';
 import { analyzeProductionData } from '../services/geminiService';
 import { ProductionLog, Sector, PointRule } from '../types';
@@ -12,21 +12,21 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon // <--- 2. ICONOS NUEVOS
+  Timer, Layers, LayoutList, Scale, AlertOctagon
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 
 export const ManagerDashboard: React.FC = () => {
-  // --- ESTADOS ORIGINALES ---
+  // --- ESTADOS DE DATOS ---
   const [allLogs, setAllLogs] = useState<ProductionLog[]>([]); 
   const [filteredLogs, setFilteredLogs] = useState<ProductionLog[]>([]); 
   const [operatorList, setOperatorList] = useState<string[]>([]);
-  const [matrix, setMatrix] = useState<PointRule[]>([]); // Para cálculos de costo
+  const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // --- NAVEGACIÓN (PESTAÑAS) ---
+  // --- NAVEGACIÓN ---
   const [activeTab, setActiveTab] = useState<'metrics' | 'efficiency' | 'audit'>('metrics');
 
   const [startDate, setStartDate] = useState(() => {
@@ -42,13 +42,13 @@ export const ManagerDashboard: React.FC = () => {
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [tempTarget, setTempTarget] = useState<string>("24960");
 
-  // --- ESTADOS NUEVOS (EFICIENCIA Y AUDITORÍA) ---
-  const [globalDays, setGlobalDays] = useState<number>(20); // Días estándar
+  // --- ESTADOS EFICIENCIA Y AUDITORÍA ---
+  const [globalDays, setGlobalDays] = useState<number>(20); 
   const [shiftHours, setShiftHours] = useState<number>(8.5);
   const [pointsPerHour, setPointsPerHour] = useState<number>(3600);
-  const [customDays, setCustomDays] = useState<Record<string, number>>({}); // Días por operario
-  const [efficiencyView, setEfficiencyView] = useState<'operator' | 'sector'>('operator'); // Toggle vista
-  const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({}); // Stock Tango
+  const [customDays, setCustomDays] = useState<Record<string, number>>({});
+  const [efficiencyView, setEfficiencyView] = useState<'operator' | 'sector'>('operator');
+  const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({});
 
   // --- SEGURIDAD ---
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -59,7 +59,7 @@ export const ManagerDashboard: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
-  const MASTER_PASSWORD = "admin123";
+  const MASTER_PASSWORD = "admin";
 
   // --- INICIALIZACIÓN ---
   useEffect(() => {
@@ -100,7 +100,7 @@ export const ManagerDashboard: React.FC = () => {
     setFilteredLogs(filtered);
   };
 
-  // --- CÁLCULOS ORIGINALES (Métricas) ---
+  // --- CÁLCULOS VISUALES (Métricas) ---
   const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
     const date = log.timestamp.split('T')[0]; 
     const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
@@ -126,18 +126,16 @@ export const ManagerDashboard: React.FC = () => {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
 
-  // --- CÁLCULOS NUEVOS (Eficiencia) ---
+  // --- CÁLCULOS EFICIENCIA ---
   const getEfficiencyData = () => {
-    // 1. Agrupar por operario
     const opStats = Object.values(filteredLogs.reduce((acc, log) => {
         if (!acc[log.operatorName]) {
-            acc[log.operatorName] = { name: log.operatorName, sector: log.sector, points: 0 };
+            acc[log.operatorName] = { name: log.operatorName, sector: log.sector || 'General', points: 0 };
         }
         acc[log.operatorName].points += log.totalPoints;
         return acc;
     }, {} as Record<string, { name: string; sector: string; points: number }>));
 
-    // 2. Calcular individuales
     const detailedStats = opStats.map(stat => {
         const daysWorked = customDays[stat.name] !== undefined ? customDays[stat.name] : globalDays;
         const potentialPoints = daysWorked * shiftHours * pointsPerHour;
@@ -146,7 +144,6 @@ export const ManagerDashboard: React.FC = () => {
         return { ...stat, daysWorked, potentialPoints, difference, performancePct, isSurplus: difference >= 0 };
     });
 
-    // 3. Agrupar por sector si es necesario
     if (efficiencyView === 'sector') {
         const sectorStats = detailedStats.reduce((acc, stat) => {
             if (!acc[stat.sector]) acc[stat.sector] = { name: stat.sector, count: 0, points: 0, potentialPoints: 0 };
@@ -167,9 +164,7 @@ export const ManagerDashboard: React.FC = () => {
     return detailedStats.sort((a, b) => b.performancePct - a.performancePct);
   };
 
-  const efficiencyData = getEfficiencyData();
-
-  // --- CÁLCULOS NUEVOS (Auditoría) ---
+  // --- CÁLCULOS AUDITORÍA ---
   const getAuditData = () => {
     const modelsInLogs = Array.from(new Set(filteredLogs.map(l => l.model)));
     return modelsInLogs.map(modelName => {
@@ -182,93 +177,95 @@ export const ManagerDashboard: React.FC = () => {
       return { model: modelName, standardValue, declaredPoints, tangoQty, theoreticalPoints, difference, deviationPct };
     }).sort((a, b) => b.declaredPoints - a.declaredPoints);
   };
-  const auditData = getAuditData();
 
-  // --- HANDLERS ORIGINALES ---
+  // --- HANDLERS Y EXPORTACIONES ---
   const handleSaveTarget = async () => {
     const newVal = parseInt(tempTarget);
-    if (!isNaN(newVal) && newVal > 0) {
-      await saveProductivityTarget(newVal);
-      setDailyTarget(newVal);
-      setIsEditingTarget(false);
-      refreshData(); 
+    if (!isNaN(newVal) && newVal > 0) { await saveProductivityTarget(newVal); setDailyTarget(newVal); setIsEditingTarget(false); refreshData(); }
+  };
+
+  const handleClearData = async () => { if (window.confirm("¡PELIGRO! ¿Borrar historial?")) { setLoading(true); await clearLogs(); await refreshData(); }};
+
+  const handleEngineeringAccess = () => { if (isAuthorized) openEngineeringModal(); else setShowAuthModal(true); };
+  
+  const verifyPassword = (e: React.FormEvent) => { e.preventDefault(); if (passwordInput === MASTER_PASSWORD) { setIsAuthorized(true); setShowAuthModal(false); setPasswordInput(''); openEngineeringModal(); } else { alert("Acceso denegado."); }};
+  
+  const openEngineeringModal = async () => { setShowEngineeringModal(true); if (!analysisResult) runAnalysis(); };
+  
+  const runAnalysis = async () => { setIsAnalyzing(true); try { const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator, dailyTarget); setAnalysisResult(result); } catch (e) { setAnalysisResult("Error al generar análisis."); } finally { setIsAnalyzing(false); }};
+
+  // --- 1. EXPORTADOR GENÉRICO DE CSV (Corrección Issue Excel) ---
+  const generateGenericCSV = (headers: string[], rows: (string | number)[][], filename: string) => {
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filename}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- 2. EXCEL INTELIGENTE (Depende de la pestaña) ---
+  const handleSmartExcel = () => {
+    if (activeTab === 'metrics') {
+        downloadCSV(filteredLogs, `Reporte_Metricas_${startDate}`);
+    } else if (activeTab === 'efficiency') {
+        const data = getEfficiencyData();
+        const rows = data.map((d: any) => [
+            d.name,
+            d.daysWorked || '-',
+            d.points.toFixed(2),
+            d.potentialPoints.toFixed(2),
+            d.difference.toFixed(2),
+            d.isSurplus ? "Superavit" : "Deficit"
+        ]);
+        generateGenericCSV(["Nombre", "Dias Trab", "Pts Real", "Pts Potencial", "Diferencia", "Estado"], rows, `Reporte_Eficiencia_${startDate}`);
+    } else if (activeTab === 'audit') {
+        const data = getAuditData();
+        const rows = data.map(d => [
+            d.model, d.standardValue, d.tangoQty, d.theoreticalPoints, d.declaredPoints, d.difference,
+            Math.abs(d.deviationPct) < 5 ? "OK" : (d.difference > 0 ? "Exceso" : "Faltante")
+        ]);
+        generateGenericCSV(["Modelo", "Valor Std", "Tango Qty", "Pts Teorico", "Pts Declarado", "Desvio", "Estado"], rows, `Reporte_Auditoria_${startDate}`);
     }
   };
 
-  const handleClearData = async () => {
-    if (window.confirm("¡PELIGRO! ¿Está seguro de eliminar TODOS los registros históricos?")) {
-      setLoading(true);
-      await clearLogs();
-      await refreshData();
-    }
-  };
-
-  const handleDownloadExcel = () => {
-    const filename = `Reporte_${selectedOperator === 'all' ? 'Global' : selectedOperator}_${startDate}_al_${endDate}`;
-    downloadCSV(filteredLogs, filename);
-  };
-
-  const handleEngineeringAccess = () => {
-    if (isAuthorized) openEngineeringModal();
-    else setShowAuthModal(true);
-  };
-
-  const verifyPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (passwordInput === MASTER_PASSWORD) {
-      setIsAuthorized(true);
-      setShowAuthModal(false);
-      setPasswordInput('');
-      openEngineeringModal();
-    } else {
-      alert("Acceso denegado.");
-    }
-  };
-
-  const openEngineeringModal = async () => {
-    setShowEngineeringModal(true);
-    if (!analysisResult) runAnalysis();
-  };
-
-  const runAnalysis = async () => {
-    setIsAnalyzing(true);
-    try {
-      const result = await analyzeProductionData(filteredLogs, allLogs, operatorList, selectedOperator, dailyTarget);
-      setAnalysisResult(result);
-    } catch (e) {
-      setAnalysisResult("Error al generar análisis.");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  // --- PDF INTELIGENTE (Detecta qué pestaña estás mirando) ---
+  // --- 3. PDF INTELIGENTE (Con columnas faltantes corregidas) ---
   const handleSmartPDF = async () => {
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
     
-    // PORTADA
-    doc.setFontSize(22); doc.setTextColor(30, 41, 59); doc.text(`Informe Técnico de Producción`, 14, 20);
+    doc.setFontSize(22); doc.setTextColor(30, 41, 59); doc.text(`Informe Técnico`, 14, 20);
     doc.setFontSize(10); doc.setTextColor(100); doc.text(`TopSafe S.A. | ${new Date().toLocaleDateString()}`, 14, 28);
     doc.text(`Período: ${startDate} al ${endDate}`, 14, 34);
 
     if (activeTab === 'audit') {
+        const auditData = getAuditData();
         doc.text("REPORTE DE AUDITORÍA (VS TANGO)", 14, 45);
         autoTable(doc, {
             startY: 50,
-            head: [['Modelo', 'Valor Std', 'Prod. Tango', 'Pts Teóricos', 'Pts Declarados', 'Desvío']],
-            body: auditData.map(d => [d.model, d.standardValue.toFixed(1), d.tangoQty, d.theoreticalPoints.toFixed(0), d.declaredPoints.toFixed(0), d.difference.toFixed(0)])
+            head: [['Modelo', 'Valor Std', 'Tango', 'Teórico', 'Declarado', 'Desvío', 'Estado']],
+            body: auditData.map(d => [
+                d.model, 
+                d.standardValue.toFixed(1), 
+                d.tangoQty, 
+                d.theoreticalPoints.toFixed(0), 
+                d.declaredPoints.toFixed(0), 
+                d.difference.toFixed(0),
+                Math.abs(d.deviationPct) < 5 ? "OK" : (d.difference > 0 ? "Exceso" : "Faltante")
+            ])
         });
     } else if (activeTab === 'efficiency') {
         doc.text("REPORTE DE EFICIENCIA Y OCIO", 14, 45);
+        const data = getEfficiencyData();
         if (efficiencyView === 'sector') {
-            autoTable(doc, { startY: 50, head: [['Sector', 'Real', 'Potencial', 'Balance', 'Rendimiento']], body: efficiencyData.map((s:any) => [s.name, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.difference.toFixed(0), s.performancePct.toFixed(1) + '%']) });
+            autoTable(doc, { startY: 50, head: [['Sector', 'Real', 'Potencial', 'Diferencia', 'Rendimiento', 'Estado']], body: data.map((s:any) => [s.name, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.difference.toFixed(0), s.performancePct.toFixed(1) + '%', s.isSurplus ? 'Positivo' : 'Negativo']) });
         } else {
-            autoTable(doc, { startY: 50, head: [['Operario', 'Días', 'Real', 'Potencial', 'Balance', 'Rendimiento']], body: efficiencyData.map((s:any) => [s.name, s.daysWorked, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.difference.toFixed(0), s.performancePct.toFixed(1) + '%']) });
+            autoTable(doc, { startY: 50, head: [['Operario', 'Días', 'Real', 'Potencial', 'Diferencia', 'Rendimiento']], body: data.map((s:any) => [s.name, s.daysWorked, s.points.toFixed(0), s.potentialPoints.toFixed(0), s.difference.toFixed(0), s.performancePct.toFixed(1) + '%']) });
         }
     } else {
-        // REPORTE CLÁSICO DE MÉTRICAS
         doc.text("Resumen de Métricas Generales", 14, 45);
         try {
             const chartTrend = document.getElementById('chart-trend');
@@ -278,23 +275,28 @@ export const ManagerDashboard: React.FC = () => {
             }
         } catch(e) {}
         
-        // Tabla Historial
         const finalY = (doc as any).lastAutoTable?.finalY || 130;
         doc.text("Detalle de Registros", 14, finalY + 10);
         autoTable(doc, {
             startY: finalY + 15,
-            head: [['Fecha', 'Operario', 'Modelo', 'Cant', 'Pts']],
-            body: filteredLogs.slice(0, 200).map(l => [new Date(l.timestamp).toLocaleDateString(), l.operatorName, l.model, l.quantity, l.totalPoints.toFixed(1)])
+            head: [['Fecha', 'Operario', 'Modelo', 'Cant', 'Pts', 'Obs.']],
+            body: filteredLogs.slice(0, 200).map(l => [
+                new Date(l.timestamp).toLocaleDateString(), 
+                l.operatorName, 
+                l.model, 
+                l.quantity, 
+                l.totalPoints.toFixed(1),
+                l.comments || '-'
+            ]),
+            columnStyles: { 5: { cellWidth: 50 } } // Hacemos la columna de comentarios más ancha
         });
     }
 
     doc.save(`Reporte_${activeTab}_${startDate}.pdf`);
     setIsGeneratingPDF(false);
   };
-  
-  // (Mantengo la función del modal de ingeniería separada para no romper nada)
+
   const handleFullEngineeringReport = async () => {
-    // Esta función genera el PDF completo con análisis de IA desde el modal
     setIsGeneratingPDF(true);
     const doc = new jsPDF();
     doc.setFontSize(22); doc.text(`Informe de Ingeniería`, 14, 20);
@@ -309,13 +311,15 @@ export const ManagerDashboard: React.FC = () => {
 
   if (loading && allLogs.length === 0) return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>;
 
+  const auditData = getAuditData();
+  const efficiencyData = getEfficiencyData();
+
   return (
     <div className="space-y-6 p-4 md:p-8 pb-20">
       {/* HEADER */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div>
            <h2 className="text-2xl font-bold text-slate-800">Dashboard Gerencial</h2>
-           {/* PESTAÑAS DE NAVEGACIÓN */}
            <div className="flex gap-2 mt-2 bg-slate-100 p-1 rounded-full w-fit">
              <button onClick={() => setActiveTab('metrics')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'metrics' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Métricas</button>
              <button onClick={() => setActiveTab('efficiency')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'efficiency' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Eficiencia & Ocio</button>
@@ -341,7 +345,7 @@ export const ManagerDashboard: React.FC = () => {
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
             </div>
             <div className="flex gap-2">
-                <button onClick={handleDownloadExcel} className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200" title="Excel"><FileDown className="w-5 h-5" /></button>
+                <button onClick={handleSmartExcel} className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200" title="Excel"><FileDown className="w-5 h-5" /></button>
                 <button onClick={handleSmartPDF} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="PDF de la vista actual"><FileText className="w-5 h-5" /></button>
                 <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"><RefreshCw className="w-5 h-5" /></button>
                 <div className="h-8 w-px bg-slate-300 mx-1"></div>
@@ -353,12 +357,9 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ================================================================================== */}
       {/* PESTAÑA 1: MÉTRICAS ORIGINALES */}
-      {/* ================================================================================== */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* KPI CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
@@ -372,7 +373,6 @@ export const ManagerDashboard: React.FC = () => {
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100"><p className="text-sm text-slate-500 font-medium uppercase">Registros</p><p className="text-3xl font-bold text-emerald-600 mt-2">{filteredLogs.length}</p></div>
             </div>
 
-            {/* GRÁFICOS */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 lg:col-span-1 flex flex-col h-96">
                     <div className="flex justify-between items-center mb-4">
@@ -416,17 +416,25 @@ export const ManagerDashboard: React.FC = () => {
                 <div className="px-6 py-4 border-b border-slate-100 flex justify-between"><h3 className="font-semibold text-slate-800">Historial Detallado</h3><button onClick={handleClearData} className="text-red-500 hover:text-red-700"><Trash2 className="w-5 h-5"/></button></div>
                 <div className="overflow-x-auto max-h-96">
                     <table className="w-full text-sm text-left text-slate-600">
-                        <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0"><tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Pts</th></tr></thead>
-                        <tbody>{filteredLogs.slice(0, 50).map(log => (<tr key={log.id} className="border-b hover:bg-slate-50"><td className="px-6 py-4">{new Date(log.timestamp).toLocaleDateString()}</td><td className="px-6 py-4 font-bold">{log.operatorName}</td><td className="px-6 py-4">{log.model}</td><td className="px-6 py-4 text-right font-bold text-blue-600">{log.totalPoints.toFixed(1)}</td></tr>))}</tbody>
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0"><tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Operario</th><th className="px-6 py-3">Modelo</th><th className="px-6 py-3 text-right">Pts</th><th className="px-6 py-3 w-48">Obs.</th></tr></thead>
+                        <tbody>
+                            {filteredLogs.slice(0, 100).map(log => (
+                                <tr key={log.id} className="border-b hover:bg-slate-50">
+                                    <td className="px-6 py-4">{new Date(log.timestamp).toLocaleDateString()}</td>
+                                    <td className="px-6 py-4 font-bold">{log.operatorName}</td>
+                                    <td className="px-6 py-4">{log.model}</td>
+                                    <td className="px-6 py-4 text-right font-bold text-blue-600">{log.totalPoints.toFixed(1)}</td>
+                                    <td className="px-6 py-4 text-xs text-slate-500" title={log.comments}>{log.comments || '-'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
             </div>
         </div>
       )}
 
-      {/* ================================================================================== */}
-      {/* PESTAÑA 2: EFICIENCIA Y OCIO (LO NUEVO) */}
-      {/* ================================================================================== */}
+      {/* PESTAÑA 2: EFICIENCIA Y OCIO */}
       {activeTab === 'efficiency' && (
          <div className="animate-in fade-in space-y-6">
             <div className="bg-indigo-50 p-6 rounded-xl shadow-md border-l-4 border-indigo-600">
@@ -435,13 +443,11 @@ export const ManagerDashboard: React.FC = () => {
                         <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Timer className="w-6 h-6 text-indigo-600"/> Eficiencia de Planta</h3>
                         <p className="text-slate-600 text-sm mt-1">Detección de superávit de producción y tiempo ocioso.</p>
                     </div>
-                    {/* TOGGLE VISTA */}
                     <div className="bg-white p-1 rounded-lg border border-indigo-100 flex">
                         <button onClick={() => setEfficiencyView('operator')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${efficiencyView === 'operator' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}><LayoutList className="w-4 h-4 inline mr-1"/> Detalle Operario</button>
                         <button onClick={() => setEfficiencyView('sector')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${efficiencyView === 'sector' ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}><Layers className="w-4 h-4 inline mr-1"/> Resumen Sector</button>
                     </div>
                 </div>
-                
                 <div className="flex flex-wrap gap-4 bg-white p-4 rounded-lg shadow-sm border border-indigo-100 mt-4 items-end">
                      <div><label className="text-[10px] text-indigo-500 font-bold block mb-1">DÍAS ESTÁNDAR (Global)</label><input type="number" value={globalDays} onChange={e => setGlobalDays(Number(e.target.value))} className="w-24 bg-slate-50 border border-slate-300 rounded px-3 py-2 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"/></div>
                      <div><label className="text-[10px] text-indigo-500 font-bold block mb-1">HORAS TURNO</label><input type="number" value={shiftHours} onChange={e => setShiftHours(Number(e.target.value))} className="w-24 bg-slate-50 border border-slate-300 rounded px-3 py-2 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"/></div>
@@ -473,51 +479,26 @@ export const ManagerDashboard: React.FC = () => {
                                         <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] text-white ${idx<3 ? 'bg-indigo-500' : 'bg-slate-400'}`}>{idx+1}</div>
                                         {stat.name}
                                     </td>
-
-                                    {/* COLUMNA DÍAS EDITABLE (Solo en vista Operario) */}
                                     {efficiencyView === 'operator' && (
                                         <td className="px-6 py-4 text-center">
-                                            <input 
-                                                type="number" 
-                                                className="w-16 text-center border border-slate-200 rounded bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700"
-                                                value={stat.daysWorked}
-                                                onChange={(e) => setCustomDays({ ...customDays, [stat.name]: Number(e.target.value) })}
-                                            />
+                                            <input type="number" className="w-16 text-center border border-slate-200 rounded bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-700" value={stat.daysWorked} onChange={(e) => setCustomDays({ ...customDays, [stat.name]: Number(e.target.value) })}/>
                                         </td>
                                     )}
                                     {efficiencyView === 'sector' && <td className="px-6 py-4 text-center font-mono text-slate-500">{stat.operatorsCount}</td>}
-
                                     <td className="px-6 py-4 text-right font-medium">{stat.points.toLocaleString('es-AR')}</td>
                                     <td className="px-6 py-4 text-right text-indigo-600 bg-indigo-50/30 font-mono">{stat.potentialPoints.toLocaleString('es-AR')}</td>
-                                    
-                                    {/* COLUMNA BALANCE (SUPERÁVIT / DÉFICIT) */}
-                                    <td className={`px-6 py-4 text-right font-bold ${stat.isSurplus ? 'text-green-600 bg-green-50/30' : 'text-red-600 bg-red-50/30'}`}>
-                                        {stat.isSurplus ? '+' : ''}{stat.difference.toLocaleString('es-AR')}
-                                    </td>
-
-                                    <td className="px-6 py-4 text-center">
-                                        {stat.isSurplus ? (
-                                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold border border-green-200">SUPERÁVIT</span>
-                                        ) : (
-                                            <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200">DÉFICIT {(100 - stat.performancePct).toFixed(0)}%</span>
-                                        )}
-                                    </td>
+                                    <td className={`px-6 py-4 text-right font-bold ${stat.isSurplus ? 'text-green-600 bg-green-50/30' : 'text-red-600 bg-red-50/30'}`}>{stat.isSurplus ? '+' : ''}{stat.difference.toLocaleString('es-AR')}</td>
+                                    <td className="px-6 py-4 text-center">{stat.isSurplus ? <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold border border-green-200">SUPERÁVIT</span> : <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200">DÉFICIT {(100 - stat.performancePct).toFixed(0)}%</span>}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                  </div>
             </div>
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex gap-3 items-center text-xs text-slate-600">
-                <AlertOctagon className="w-5 h-5 text-slate-400"/>
-                <p>El "Balance" se calcula restando la producción real a la capacidad teórica (Días × Horas × 3600).</p>
-            </div>
          </div>
       )}
 
-      {/* ================================================================================== */}
       {/* PESTAÑA 3: AUDITORÍA (STOCK) */}
-      {/* ================================================================================== */}
       {activeTab === 'audit' && (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
@@ -550,7 +531,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* --- MODALES --- */}
+      {/* MODALES */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
