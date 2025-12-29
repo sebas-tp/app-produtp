@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info, Search // <--- IMPORTAMOS SEARCH
+  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info, Search, Zap
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -27,7 +27,7 @@ export const ManagerDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   
   // --- NAVEGACIÓN ---
-  const [activeTab, setActiveTab] = useState<'metrics' | 'efficiency' | 'audit' | 'accounting'>('metrics');
+  const [activeTab, setActiveTab] = useState<'metrics' | 'efficiency' | 'audit' | 'accounting' | 'simulator'>('metrics');
 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -51,7 +51,11 @@ export const ManagerDashboard: React.FC = () => {
   
   // --- INPUTS TANGO & AUDITORÍA ---
   const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({});
-  const [auditSearch, setAuditSearch] = useState(''); // <--- NUEVO ESTADO PARA BUSCADOR
+  const [auditSearch, setAuditSearch] = useState('');
+
+  // --- INPUTS SIMULADOR (NUEVO) ---
+  const [simModel, setSimModel] = useState<string>('');
+  const [simQty, setSimQty] = useState<number>(100);
 
   // --- ESTADO PARA ACORDEÓN CONTABLE ---
   const [expandedSector, setExpandedSector] = useState<string | null>(null);
@@ -104,6 +108,16 @@ export const ManagerDashboard: React.FC = () => {
       return dateMatch && operatorMatch;
     });
     setFilteredLogs(filtered);
+  };
+
+  // --- HELPER: NORMALIZAR SECTORES ---
+  const normalizeCostCenter = (sectorName: string) => {
+    const s = sectorName.toUpperCase();
+    if (s.includes('CORTE')) return 'CORTE';
+    if (s.includes('COSTURA')) return 'COSTURA';
+    if (s.includes('ARMADO') || s.includes('APARADO')) return 'ARMADO';
+    if (s.includes('EMBALAJE') || s.includes('LIMPIEZA') || s.includes('EMPAQUE')) return 'EMBALAJE';
+    return 'OTROS';
   };
 
   // --- CÁLCULOS 1: MÉTRICAS ---
@@ -184,17 +198,8 @@ export const ManagerDashboard: React.FC = () => {
     }).sort((a, b) => b.declaredPoints - a.declaredPoints);
   };
 
-  // --- CÁLCULOS 4: CONTABILIDAD (CENTROS DE COSTO) ---
+  // --- CÁLCULOS 4: CONTABILIDAD ---
   const getAccountingData = () => {
-    const normalizeCostCenter = (sectorName: string) => {
-        const s = sectorName.toUpperCase();
-        if (s.includes('CORTE')) return 'CORTE';
-        if (s.includes('COSTURA')) return 'COSTURA';
-        if (s.includes('ARMADO') || s.includes('APARADO')) return 'ARMADO';
-        if (s.includes('EMBALAJE') || s.includes('LIMPIEZA') || s.includes('EMPAQUE')) return 'EMBALAJE';
-        return 'OTROS';
-    };
-
     const opSectorMap: Record<string, string> = {};
     const opPoints: Record<string, number> = {};
     const opPointsPerRawSector: Record<string, Record<string, number>> = {};
@@ -258,20 +263,46 @@ export const ManagerDashboard: React.FC = () => {
     return reportData;
   };
 
+  // --- CÁLCULOS 5: SIMULADOR (NUEVO) ---
+  const getSimulationData = () => {
+    if (!simModel || simQty <= 0) return [];
+    
+    // 1. Obtener reglas del modelo
+    const rules = matrix.filter(r => r.model === simModel);
+    
+    // 2. Agrupar puntos por sector normalizado
+    const loadPerSector: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0 };
+    
+    rules.forEach(r => {
+        const cc = normalizeCostCenter(r.sector);
+        if (loadPerSector[cc] !== undefined) {
+            loadPerSector[cc] += (r.pointsPerUnit * simQty);
+        }
+    });
+
+    // 3. Calcular personas necesarias (Capacidad de 1 persona = shiftHours * pointsPerHour)
+    const singlePersonCapacity = shiftHours * pointsPerHour;
+
+    return Object.entries(loadPerSector).map(([sector, points]) => ({
+        sector,
+        pointsRequired: points,
+        peopleNeeded: points / singlePersonCapacity
+    }));
+  };
+
   // --- VARIABLES DE CÁLCULO ---
   const auditData = getAuditData();
   const efficiencyData = getEfficiencyData();
   const accountingData = getAccountingData();
+  const simulationData = getSimulationData(); // Data del simulador
 
-  // Filtrado de Auditoría para la tabla (visual)
-  const visibleAuditData = auditData.filter(item => 
-    item.model.toLowerCase().includes(auditSearch.toLowerCase())
-  );
+  // Variables visuales
+  const uniqueModels = Array.from(new Set(matrix.map(m => m.model))).sort();
+  const visibleAuditData = auditData.filter(item => item.model.toLowerCase().includes(auditSearch.toLowerCase()));
 
-  // KPIs Globales para Balance
+  // KPIs Globales
   const totalTangoPoints = auditData.reduce((sum, item) => sum + item.theoreticalPoints, 0);
   const totalDeclaredPoints = filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0);
-  
   const isGlobalView = selectedOperator === 'all';
   const globalDifference = isGlobalView ? (totalDeclaredPoints - totalTangoPoints) : 0;
 
@@ -316,6 +347,9 @@ export const ManagerDashboard: React.FC = () => {
     } else if (activeTab === 'accounting') {
         const rows = accountingData.map(d => [d.center, d.headcount, d.capacity, d.real, d.productivity.toFixed(2) + '%']);
         generateGenericCSV(["Centro Costo", "Operarios", "Capacidad", "Real (Tango)", "Productividad"], rows, `Reporte_Contable_${startDate}`);
+    } else if (activeTab === 'simulator') {
+        const rows = simulationData.map(d => [d.sector, d.pointsRequired, d.peopleNeeded.toFixed(2)]);
+        generateGenericCSV(["Sector", "Carga Puntos", "Personas Necesarias"], rows, `Simulacion_${simModel}_${simQty}`);
     }
   };
 
@@ -349,6 +383,15 @@ export const ManagerDashboard: React.FC = () => {
             body: accountingData.map(r => [r.center, r.headcount, r.capacity.toLocaleString('es-AR'), r.real.toLocaleString('es-AR'), r.productivity.toFixed(1) + '%']),
             theme: 'grid',
             headStyles: { fillColor: [22, 163, 74] } 
+        });
+    } else if (activeTab === 'simulator') {
+        doc.text(`SIMULACIÓN DE DOTACIÓN: Modelo ${simModel} (${simQty} u.)`, 14, 45);
+        autoTable(doc, {
+            startY: 55,
+            head: [['Centro de Costo', 'Carga (Pts)', 'Personas Sugeridas']],
+            body: simulationData.map(r => [r.sector, r.pointsRequired.toLocaleString(), r.peopleNeeded.toFixed(2)]),
+            theme: 'grid',
+            headStyles: { fillColor: [249, 115, 22] } // Orange
         });
     } else {
         doc.text("Resumen de Métricas Generales", 14, 45);
@@ -384,6 +427,7 @@ export const ManagerDashboard: React.FC = () => {
              <button onClick={() => setActiveTab('efficiency')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'efficiency' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Eficiencia</button>
              <button onClick={() => setActiveTab('audit')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'audit' ? 'bg-white text-red-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Auditoría</button>
              <button onClick={() => setActiveTab('accounting')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'accounting' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Contabilidad</button>
+             <button onClick={() => setActiveTab('simulator')} className={`text-xs font-bold px-4 py-1.5 rounded-full transition-all ${activeTab === 'simulator' ? 'bg-white text-orange-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}><Zap className="w-3 h-3 inline mr-1"/> Simulador</button>
            </div>
         </div>
         
@@ -419,7 +463,7 @@ export const ManagerDashboard: React.FC = () => {
       {/* PESTAÑA 1: MÉTRICAS */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* KPI CARDS REDISEÑADAS */}
+            {/* KPI CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
@@ -625,7 +669,7 @@ export const ManagerDashboard: React.FC = () => {
                             <tr><th className="px-6 py-4">Modelo</th><th className="px-6 py-4 text-right bg-blue-50/50">Valor Std</th><th className="px-6 py-4 text-right bg-blue-50/50">Declarado</th><th className="px-6 py-4 text-center bg-red-50/50 w-48">Cant. Real (Tango)</th><th className="px-6 py-4 text-right bg-red-50/50">Teórico</th><th className="px-6 py-4 text-right">Desvío</th><th className="px-6 py-4 text-center">Estado</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {visibleAuditData.map((row) => (
+                            {getAuditData().filter(item => item.model.toLowerCase().includes(auditSearch.toLowerCase())).map((row) => (
                                 <tr key={row.model} className="hover:bg-slate-50">
                                     <td className="px-6 py-4 font-bold text-slate-800">{row.model}</td>
                                     <td className="px-6 py-4 text-right font-mono text-slate-600 bg-blue-50/30">{row.standardValue.toFixed(1)}</td>
@@ -643,10 +687,9 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 4: CONTABILIDAD (NUEVO DRILL-DOWN) */}
+      {/* PESTAÑA 4: CONTABILIDAD */}
       {activeTab === 'accounting' && (
         <div className="animate-in fade-in space-y-6">
-            {/* KPI Cards Contables */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-slate-400">
                     <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Briefcase className="w-4 h-4"/> Capacidad Instalada (Total)</p>
@@ -680,7 +723,7 @@ export const ManagerDashboard: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {accountingData.map((row) => (
+                        {getAccountingData().map((row) => (
                             <React.Fragment key={row.center}>
                                 <tr className={row.center === 'TOTAL PLANTA' ? "bg-slate-100 font-bold border-t-2 border-slate-300" : "hover:bg-slate-50 cursor-pointer"} onClick={() => row.center !== 'TOTAL PLANTA' && setExpandedSector(expandedSector === row.center ? null : row.center)}>
                                     <td className="px-6 py-4 font-bold text-slate-800 flex items-center gap-2">
@@ -732,6 +775,75 @@ export const ManagerDashboard: React.FC = () => {
                     </tbody>
                 </table>
             </div>
+        </div>
+      )}
+
+      {/* PESTAÑA 5: SIMULADOR (NUEVA) */}
+      {activeTab === 'simulator' && (
+        <div className="animate-in fade-in space-y-6">
+            <div className="bg-orange-50 p-6 rounded-xl shadow-md border-l-4 border-orange-600">
+                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Zap className="w-6 h-6 text-orange-600"/> Simulador de Dotación</h3>
+                <p className="text-slate-600 text-sm mt-1 mb-4">Calcula el personal necesario para cumplir con un objetivo de producción específico.</p>
+                
+                <div className="flex flex-wrap gap-4 bg-white p-4 rounded-lg shadow-sm border border-orange-100 items-end">
+                     <div className="flex-1 min-w-[200px]">
+                        <label className="text-[10px] text-orange-500 font-bold block mb-1">MODELO A FABRICAR</label>
+                        <select className="w-full border border-slate-300 rounded px-3 py-2 text-slate-800 font-bold outline-none focus:ring-2 focus:ring-orange-500" value={simModel} onChange={e => setSimModel(e.target.value)}>
+                            <option value="">-- Seleccionar --</option>
+                            {uniqueModels.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                     </div>
+                     <div className="w-32">
+                        <label className="text-[10px] text-orange-500 font-bold block mb-1">CANTIDAD (u.)</label>
+                        <input type="number" className="w-full border border-slate-300 rounded px-3 py-2 text-slate-800 font-black text-center outline-none focus:ring-2 focus:ring-orange-500" value={simQty} onChange={e => setSimQty(Number(e.target.value))}/>
+                     </div>
+                     <div className="pb-2 text-sm text-slate-400 font-medium">Base cálculo: 1 persona = {(shiftHours * pointsPerHour).toLocaleString()} pts/día</div>
+                </div>
+            </div>
+
+            {simModel && simQty > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-xs text-slate-500 uppercase">
+                            <tr>
+                                <th className="px-6 py-4">Centro de Costo</th>
+                                <th className="px-6 py-4 text-right">Carga de Trabajo (Pts)</th>
+                                <th className="px-6 py-4 text-center font-bold bg-orange-50 text-orange-700">Personas Necesarias</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {getEfficiencyData() /* Dummy call to ensure logic loaded */ } 
+                            {/* NOTE: We call the simulation function directly here */}
+                            {(() => {
+                                const simData = (() => {
+                                    // REPEAT LOGIC LOCALLY FOR RENDER
+                                    const rules = matrix.filter(r => r.model === simModel);
+                                    const loadPerSector: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0 };
+                                    rules.forEach(r => {
+                                        const cc = normalizeCostCenter(r.sector);
+                                        if (loadPerSector[cc] !== undefined) loadPerSector[cc] += (r.pointsPerUnit * simQty);
+                                    });
+                                    const singlePersonCapacity = shiftHours * pointsPerHour;
+                                    return Object.entries(loadPerSector).map(([sector, points]) => ({
+                                        sector, points, people: points / singlePersonCapacity
+                                    }));
+                                })();
+
+                                return simData.map((row) => (
+                                    <tr key={row.sector} className="hover:bg-slate-50">
+                                        <td className="px-6 py-4 font-bold text-slate-800">{row.sector}</td>
+                                        <td className="px-6 py-4 text-right font-mono text-slate-600">{row.points.toLocaleString('es-AR')}</td>
+                                        <td className="px-6 py-4 text-center bg-orange-50">
+                                            <span className="text-xl font-black text-orange-600">{Math.ceil(row.people)}</span>
+                                            <span className="text-xs text-orange-400 ml-2">({row.people.toFixed(2)})</span>
+                                        </td>
+                                    </tr>
+                                ));
+                            })()}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </div>
       )}
 
