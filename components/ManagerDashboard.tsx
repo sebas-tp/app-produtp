@@ -12,7 +12,7 @@ import {
 import { 
   Trash2, RefreshCw, FileDown, FileText, Calendar, Loader2, Target, 
   Pencil, Save, Users, TrendingUp, Box, Lock, BrainCircuit, X, ShieldCheck, Trophy, Hash, Activity, Filter,
-  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info
+  Timer, Layers, LayoutList, Scale, AlertOctagon, Briefcase, Calculator, ChevronDown, ChevronRight, CheckCircle2, Info, Search // <--- IMPORTAMOS SEARCH
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -49,8 +49,9 @@ export const ManagerDashboard: React.FC = () => {
   const [customDays, setCustomDays] = useState<Record<string, number>>({});
   const [efficiencyView, setEfficiencyView] = useState<'operator' | 'sector'>('operator');
   
-  // --- INPUTS TANGO (AUDITORÍA) ---
+  // --- INPUTS TANGO & AUDITORÍA ---
   const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({});
+  const [auditSearch, setAuditSearch] = useState(''); // <--- NUEVO ESTADO PARA BUSCADOR
 
   // --- ESTADO PARA ACORDEÓN CONTABLE ---
   const [expandedSector, setExpandedSector] = useState<string | null>(null);
@@ -262,12 +263,15 @@ export const ManagerDashboard: React.FC = () => {
   const efficiencyData = getEfficiencyData();
   const accountingData = getAccountingData();
 
+  // Filtrado de Auditoría para la tabla (visual)
+  const visibleAuditData = auditData.filter(item => 
+    item.model.toLowerCase().includes(auditSearch.toLowerCase())
+  );
+
   // KPIs Globales para Balance
   const totalTangoPoints = auditData.reduce((sum, item) => sum + item.theoreticalPoints, 0);
-  // OJO: Si filtramos por operario, totalDeclared es solo de ese operario, pero Tango sigue siendo global.
   const totalDeclaredPoints = filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0);
   
-  // Si hay filtro de operario, el balance no se puede calcular bien contra el stock global
   const isGlobalView = selectedOperator === 'all';
   const globalDifference = isGlobalView ? (totalDeclaredPoints - totalTangoPoints) : 0;
 
@@ -412,7 +416,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* PESTAÑA 1: MÉTRICAS (Con las nuevas tarjetas de comparación) */}
+      {/* PESTAÑA 1: MÉTRICAS */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
             {/* KPI CARDS REDISEÑADAS */}
@@ -603,9 +607,16 @@ export const ManagerDashboard: React.FC = () => {
       {/* PESTAÑA 3: AUDITORÍA */}
       {activeTab === 'audit' && (
         <div className="animate-in fade-in space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Scale className="w-6 h-6 text-red-600"/> Conciliación vs. Tango / Stock</h3>
-                <p className="text-slate-500 text-sm mt-1">Comparativa entre producción declarada y stock real.</p>
+            <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500 flex justify-between items-center">
+                <div>
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Scale className="w-6 h-6 text-red-600"/> Conciliación vs. Tango / Stock</h3>
+                    <p className="text-slate-500 text-sm mt-1">Comparativa entre producción declarada y stock real.</p>
+                </div>
+                {/* BUSCADOR */}
+                <div className="relative">
+                    <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>
+                    <input type="text" placeholder="Buscar modelo..." className="pl-9 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-sm" value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)}/>
+                </div>
             </div>
             <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                 <div className="overflow-x-auto">
@@ -614,7 +625,7 @@ export const ManagerDashboard: React.FC = () => {
                             <tr><th className="px-6 py-4">Modelo</th><th className="px-6 py-4 text-right bg-blue-50/50">Valor Std</th><th className="px-6 py-4 text-right bg-blue-50/50">Declarado</th><th className="px-6 py-4 text-center bg-red-50/50 w-48">Cant. Real (Tango)</th><th className="px-6 py-4 text-right bg-red-50/50">Teórico</th><th className="px-6 py-4 text-right">Desvío</th><th className="px-6 py-4 text-center">Estado</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {auditData.map((row) => (
+                            {visibleAuditData.map((row) => (
                                 <tr key={row.model} className="hover:bg-slate-50">
                                     <td className="px-6 py-4 font-bold text-slate-800">{row.model}</td>
                                     <td className="px-6 py-4 text-right font-mono text-slate-600 bg-blue-50/30">{row.standardValue.toFixed(1)}</td>
@@ -632,9 +643,10 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 4: CONTABILIDAD */}
+      {/* PESTAÑA 4: CONTABILIDAD (NUEVO DRILL-DOWN) */}
       {activeTab === 'accounting' && (
         <div className="animate-in fade-in space-y-6">
+            {/* KPI Cards Contables */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-slate-400">
                     <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2"><Briefcase className="w-4 h-4"/> Capacidad Instalada (Total)</p>
