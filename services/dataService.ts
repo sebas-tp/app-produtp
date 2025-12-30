@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
-  query, orderBy, setDoc, where, writeBatch, limit // <--- 1. AGREGADO "limit"
+  query, orderBy, setDoc, where, writeBatch, limit 
 } from 'firebase/firestore';
 import { ProductionLog, Sector, PointRule, NewsItem } from '../types';
 import jsPDF from 'jspdf';
@@ -37,17 +37,40 @@ const MATRIX_COL = 'points_matrix';
 const DEFAULT_TARGET = 24960;
 
 // =========================================================
-// 3. GESTIÓN DE LOGS (PRODUCCIÓN)
+// 3. GESTIÓN DE LOGS (OPTIMIZADO POR FECHAS)
 // =========================================================
 
-export const getLogs = async (): Promise<ProductionLog[]> => {
+// MODIFICACIÓN CLAVE: Acepta argumentos de fecha opcionales
+export const getLogs = async (startDate?: string, endDate?: string): Promise<ProductionLog[]> => {
   try {
-    // 2. OPTIMIZACIÓN: Solo traemos los últimos 800 registros
-    const q = query(
-      collection(db, LOGS_COL), 
-      orderBy('timestamp', 'desc'), 
-      limit(800) // <--- ESTO PROTEGE TU CUOTA GRATUITA
-    );
+    const logsRef = collection(db, LOGS_COL);
+    let q;
+
+    if (startDate && endDate) {
+      // ESCENARIO A: Rango de fechas (Filtrado en Servidor = Ahorro Real)
+      // Ajustamos las horas para cubrir todo el día seleccionado
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      q = query(
+        logsRef,
+        where('timestamp', '>=', start.toISOString()),
+        where('timestamp', '<=', end.toISOString()),
+        orderBy('timestamp', 'desc')
+      );
+    } else {
+      // ESCENARIO B: Carga inicial (Sin fechas)
+      // Bajamos de 800 a 100. Esto es lo que carga al abrir la app.
+      // 100 lecturas es mucho mas seguro que 800 para desarrollo.
+      q = query(
+        logsRef, 
+        orderBy('timestamp', 'desc'), 
+        limit(100) 
+      );
+    }
     
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => {
@@ -77,7 +100,8 @@ export const getLogs = async (): Promise<ProductionLog[]> => {
   }
 };
 
-export const getProductionLogs = getLogs;
+// Mantenemos el alias para compatibilidad
+export const getProductionLogs = () => getLogs(); 
 
 export const saveLog = async (log: any) => {
   const { id, ...logData } = log;
@@ -105,6 +129,8 @@ export const deleteProductionLog = async (id: string) => {
 };
 
 export const clearLogs = async (): Promise<void> => {
+  // OJO: Esto lee para borrar. Si tienes 5000 registros, son 5000 lecturas + 5000 escrituras.
+  // Úsalo con precaución.
   const q = query(collection(db, LOGS_COL));
   const snapshot = await getDocs(q);
   const batch = writeBatch(db);
@@ -145,6 +171,7 @@ export const deleteOperatorWithData = async (operatorName: string) => {
     const newOps = currentOps.filter(op => op !== operatorName);
     await saveOperators(newOps);
 
+    // Nota: Esto también consume lecturas, pero es una acción administrativa rara.
     const q = query(collection(db, LOGS_COL), where('operatorName', '==', operatorName));
     const snapshot = await getDocs(q);
     
