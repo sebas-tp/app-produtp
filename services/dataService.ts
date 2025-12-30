@@ -50,7 +50,7 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
       );
     } else {
       // Carga inicial limitada para no saturar
-      q = query(logsRef, orderBy('timestamp', 'desc'), limit(100));
+      q = query(logsRef, orderBy('timestamp', 'desc'), limit(10));
     }
     
     const snapshot = await getDocs(q);
