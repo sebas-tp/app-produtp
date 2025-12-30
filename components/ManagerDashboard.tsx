@@ -53,10 +53,9 @@ export const ManagerDashboard: React.FC = () => {
   const [tangoInputs, setTangoInputs] = useState<Record<string, string>>({});
   const [auditSearch, setAuditSearch] = useState('');
 
-  // --- INPUTS SIMULADOR (NUEVO) ---
+  // --- INPUTS SIMULADOR ---
   const [simModel, setSimModel] = useState<string>('');
   const [simQty, setSimQty] = useState<number>(100);
-  // Recursos disponibles (Máquinas/Mesas) por defecto
   const [simResources, setSimResources] = useState<Record<string, number>>({
       'CORTE': 2, 'COSTURA': 5, 'ARMADO': 4, 'EMBALAJE': 2
   });
@@ -75,43 +74,67 @@ export const ManagerDashboard: React.FC = () => {
 
   const MASTER_PASSWORD = "admin";
 
-  // --- INICIALIZACIÓN ---
+  // =========================================================================
+  // OPTIMIZACIÓN DE CARGA DE DATOS (LECTURA INTELIGENTE)
+  // =========================================================================
+
+  // 1. Carga Inicial de Configuraciones (Solo una vez)
   useEffect(() => {
-    const init = async () => {
-      setLoading(true);
+    const initCatalogs = async () => {
       try {
-        const [logs, target, ops, mtx] = await Promise.all([
-          getLogs(), getProductivityTarget(), getOperators(), getPointsMatrix()
+        const [target, ops, mtx] = await Promise.all([
+          getProductivityTarget(), 
+          getOperators(), 
+          getPointsMatrix()
         ]);
-        setAllLogs(logs);
         setDailyTarget(target || 24960);
         setTempTarget((target || 24960).toString());
         setOperatorList(ops);
         setMatrix(mtx);
       } catch (e) { console.error(e); }
-      setLoading(false);
     };
-    init();
+    initCatalogs();
   }, []);
 
-  useEffect(() => { applyFilters(); }, [allLogs, startDate, endDate, selectedOperator]);
+  // 2. Carga de LOGS cuando cambian las FECHAS (Aquí está el ahorro de lecturas)
+  useEffect(() => {
+    const fetchLogs = async () => {
+      setLoading(true);
+      try {
+        // Pedimos a Firebase SOLO el rango de fechas seleccionado
+        const logs = await getLogs(startDate, endDate);
+        setAllLogs(logs);
+        
+        // Filtro local inicial
+        if (selectedOperator === 'all') {
+            setFilteredLogs(logs);
+        } else {
+            setFilteredLogs(logs.filter(l => l.operatorName === selectedOperator));
+        }
+      } catch (e) { console.error(e); }
+      setLoading(false);
+    };
+    fetchLogs();
+  }, [startDate, endDate]); // Se dispara SOLO al cambiar fechas
 
+  // 3. Filtro local de OPERARIO (Instantáneo, no gasta lecturas)
+  useEffect(() => {
+      if (selectedOperator === 'all') {
+          setFilteredLogs(allLogs);
+      } else {
+          setFilteredLogs(allLogs.filter(l => l.operatorName === selectedOperator));
+      }
+  }, [selectedOperator, allLogs]);
+
+  // Refrescar Datos (Respeta las fechas actuales para no traer todo el historial)
   const refreshData = async () => {
     setLoading(true);
-    const [logs, mtx] = await Promise.all([getLogs(), getPointsMatrix()]);
+    const [logs, mtx] = await Promise.all([getLogs(startDate, endDate), getPointsMatrix()]);
     setAllLogs(logs);
     setMatrix(mtx);
+    if (selectedOperator === 'all') setFilteredLogs(logs);
+    else setFilteredLogs(logs.filter(l => l.operatorName === selectedOperator));
     setLoading(false);
-  };
-
-  const applyFilters = () => {
-    const filtered = allLogs.filter(log => {
-      const logDate = log.timestamp.split('T')[0];
-      const dateMatch = logDate >= startDate && logDate <= endDate;
-      const operatorMatch = selectedOperator === 'all' || log.operatorName === selectedOperator;
-      return dateMatch && operatorMatch;
-    });
-    setFilteredLogs(filtered);
   };
 
   // --- HELPER: NORMALIZAR SECTORES ---
@@ -267,7 +290,7 @@ export const ManagerDashboard: React.FC = () => {
     return reportData;
   };
 
-  // --- CÁLCULOS 5: SIMULADOR (ACTUALIZADO) ---
+  // --- CÁLCULOS 5: SIMULADOR ---
   const getSimulationData = () => {
     if (!simModel || simQty <= 0) return [];
     
@@ -281,18 +304,14 @@ export const ManagerDashboard: React.FC = () => {
         }
     });
 
-    // AQUI ESTA LA CLAVE: USAMOS EL "DAILY TARGET" COMO CAPACIDAD DE 1 PERSONA
-    // 24960 puntos es lo que se le exige a una persona por día.
+    // CAPACIDAD DE 1 PERSONA = META DIARIA (24.960 pts)
     const singlePersonCapacity = dailyTarget;
 
     return Object.entries(loadPerSector).map(([sector, points]) => {
         const peopleNeeded = points / singlePersonCapacity;
-        // Obtenemos los recursos disponibles (input manual)
-        const availableResources = simResources[sector] || 0;
-        // Calculamos si hay déficit de maquinaria (gente necesaria > maquinas)
-        // Redondeamos gente hacia arriba (no podes tener 1.5 personas)
         const peopleRounded = Math.ceil(peopleNeeded);
-        const isBottleneck = peopleRounded > availableResources;
+        const available = simResources[sector] || 0;
+        const isBottleneck = peopleRounded > available;
 
         return {
             sector,
@@ -309,7 +328,7 @@ export const ManagerDashboard: React.FC = () => {
   const auditData = getAuditData();
   const efficiencyData = getEfficiencyData();
   const accountingData = getAccountingData();
-  const simulationData = getSimulationData(); // Data del simulador
+  const simulationData = getSimulationData(); 
 
   // Variables visuales
   const uniqueModels = Array.from(new Set(matrix.map(m => m.model))).sort();
