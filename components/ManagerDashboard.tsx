@@ -74,11 +74,8 @@ export const ManagerDashboard: React.FC = () => {
 
   const MASTER_PASSWORD = "admin";
 
-  // =========================================================================
-  // OPTIMIZACIÓN DE CARGA DE DATOS (LECTURA INTELIGENTE)
-  // =========================================================================
-
-  // 1. Carga Inicial de Configuraciones (Solo una vez)
+  // --- INICIALIZACIÓN Y CARGA OPTIMIZADA ---
+  
   useEffect(() => {
     const initCatalogs = async () => {
       try {
@@ -96,16 +93,13 @@ export const ManagerDashboard: React.FC = () => {
     initCatalogs();
   }, []);
 
-  // 2. Carga de LOGS cuando cambian las FECHAS (Aquí está el ahorro de lecturas)
   useEffect(() => {
     const fetchLogs = async () => {
       setLoading(true);
       try {
-        // Pedimos a Firebase SOLO el rango de fechas seleccionado
         const logs = await getLogs(startDate, endDate);
         setAllLogs(logs);
         
-        // Filtro local inicial
         if (selectedOperator === 'all') {
             setFilteredLogs(logs);
         } else {
@@ -115,9 +109,8 @@ export const ManagerDashboard: React.FC = () => {
       setLoading(false);
     };
     fetchLogs();
-  }, [startDate, endDate]); // Se dispara SOLO al cambiar fechas
+  }, [startDate, endDate]); 
 
-  // 3. Filtro local de OPERARIO (Instantáneo, no gasta lecturas)
   useEffect(() => {
       if (selectedOperator === 'all') {
           setFilteredLogs(allLogs);
@@ -126,7 +119,6 @@ export const ManagerDashboard: React.FC = () => {
       }
   }, [selectedOperator, allLogs]);
 
-  // Refrescar Datos (Respeta las fechas actuales para no traer todo el historial)
   const refreshData = async () => {
     setLoading(true);
     const [logs, mtx] = await Promise.all([getLogs(startDate, endDate), getPointsMatrix()]);
@@ -304,21 +296,22 @@ export const ManagerDashboard: React.FC = () => {
         }
     });
 
-    // CAPACIDAD DE 1 PERSONA = META DIARIA (24.960 pts)
     const singlePersonCapacity = dailyTarget;
 
     return Object.entries(loadPerSector).map(([sector, points]) => {
         const peopleNeeded = points / singlePersonCapacity;
         const peopleRounded = Math.ceil(peopleNeeded);
-        const available = simResources[sector] || 0;
-        const isBottleneck = peopleRounded > available;
+        
+        // CORRECCIÓN: Nombre de variable coincidente con el objeto de retorno
+        const availableResources = simResources[sector] || 0;
+        const isBottleneck = peopleRounded > availableResources;
 
         return {
             sector,
             pointsRequired: points,
             peopleNeeded,
             peopleRounded,
-            availableResources,
+            availableResources, // Ahora la variable existe y coincide
             isBottleneck
         };
     });
@@ -330,11 +323,9 @@ export const ManagerDashboard: React.FC = () => {
   const accountingData = getAccountingData();
   const simulationData = getSimulationData(); 
 
-  // Variables visuales
   const uniqueModels = Array.from(new Set(matrix.map(m => m.model))).sort();
   const visibleAuditData = auditData.filter(item => item.model.toLowerCase().includes(auditSearch.toLowerCase()));
 
-  // KPIs Globales
   const totalTangoPoints = auditData.reduce((sum, item) => sum + item.theoreticalPoints, 0);
   const totalDeclaredPoints = filteredLogs.reduce((sum, log) => sum + log.totalPoints, 0);
   const isGlobalView = selectedOperator === 'all';
@@ -767,7 +758,7 @@ export const ManagerDashboard: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {getAccountingData().map((row) => (
+                        {accountingData.map((row) => (
                             <React.Fragment key={row.center}>
                                 <tr className={row.center === 'TOTAL PLANTA' ? "bg-slate-100 font-bold border-t-2 border-slate-300" : "hover:bg-slate-50 cursor-pointer"} onClick={() => row.center !== 'TOTAL PLANTA' && setExpandedSector(expandedSector === row.center ? null : row.center)}>
                                     <td className="px-6 py-4 font-bold text-slate-800 flex items-center gap-2">
@@ -888,8 +879,10 @@ export const ManagerDashboard: React.FC = () => {
                                 return Object.entries(loadPerSector).map(([sector, points]) => {
                                     const peopleNeeded = points / singlePersonCapacity;
                                     const peopleRounded = Math.ceil(peopleNeeded);
-                                    const available = simResources[sector] || 0;
-                                    const isBottleneck = peopleRounded > available;
+                                    
+                                    // CORRECCIÓN: Nombre de variable coincidente con el objeto de retorno
+                                    const availableResources = simResources[sector] || 0;
+                                    const isBottleneck = peopleRounded > availableResources;
 
                                     return (
                                     <tr key={sector} className="hover:bg-slate-50">
@@ -899,7 +892,7 @@ export const ManagerDashboard: React.FC = () => {
                                             <span className="text-xl font-black text-slate-700">{peopleRounded}</span>
                                             <span className="text-xs text-slate-400 ml-2">({peopleNeeded.toFixed(1)})</span>
                                         </td>
-                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{available}</td>
+                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{availableResources}</td>
                                         <td className="px-6 py-4 text-center">
                                             {isBottleneck ? (
                                                 <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200 flex items-center justify-center gap-1"><AlertTriangle className="w-3 h-3"/> FALTA MAQ</span>
