@@ -74,13 +74,15 @@ export const ManagerDashboard: React.FC = () => {
 
   const MASTER_PASSWORD = "admin";
 
-  // --- INICIALIZACIÓN Y CARGA OPTIMIZADA ---
+  // --- INICIALIZACIÓN ---
   
   useEffect(() => {
     const initCatalogs = async () => {
       try {
         const [target, ops, mtx] = await Promise.all([
-          getProductivityTarget(), getOperators(), getPointsMatrix()
+          getProductivityTarget(), 
+          getOperators(), 
+          getPointsMatrix() // Usa caché por defecto
         ]);
         setDailyTarget(target || 24960);
         setTempTarget((target || 24960).toString());
@@ -97,7 +99,6 @@ export const ManagerDashboard: React.FC = () => {
       try {
         const logs = await getLogs(startDate, endDate);
         setAllLogs(logs);
-        
         if (selectedOperator === 'all') {
             setFilteredLogs(logs);
         } else {
@@ -119,7 +120,11 @@ export const ManagerDashboard: React.FC = () => {
 
   const refreshData = async () => {
     setLoading(true);
-    const [logs, mtx] = await Promise.all([getLogs(startDate, endDate), getPointsMatrix()]);
+    // FORZAMOS LA DESCARGA CON 'true'
+    const [logs, mtx] = await Promise.all([
+        getLogs(startDate, endDate), 
+        getPointsMatrix(true) 
+    ]);
     setAllLogs(logs);
     setMatrix(mtx);
     if (selectedOperator === 'all') setFilteredLogs(logs);
@@ -281,21 +286,17 @@ export const ManagerDashboard: React.FC = () => {
     });
     const singlePersonCapacity = dailyTarget;
     
-    // CORRECCIÓN DEL ERROR: Ahora availableResources está declarado
     return Object.entries(loadPerSector).map(([sector, points]) => {
         const peopleNeeded = points / singlePersonCapacity;
         const peopleRounded = Math.ceil(peopleNeeded);
-        
-        // Aquí definimos la variable que faltaba
         const availableResources = simResources[sector] || 0;
-        
         const isBottleneck = peopleRounded > availableResources;
         return { 
             sector, 
             pointsRequired: points, 
             peopleNeeded, 
             peopleRounded, 
-            availableResources, // Ahora sí existe
+            availableResources, 
             isBottleneck 
         };
     });
@@ -863,11 +864,8 @@ export const ManagerDashboard: React.FC = () => {
                                 return Object.entries(loadPerSector).map(([sector, points]) => {
                                     const peopleNeeded = points / singlePersonCapacity;
                                     const peopleRounded = Math.ceil(peopleNeeded);
-                                    
-                                    // CORRECCIÓN: Definimos la variable ANTES de usarla en el return
-                                    const availableResources = simResources[sector] || 0;
-                                    
-                                    const isBottleneck = peopleRounded > availableResources;
+                                    const available = simResources[sector] || 0;
+                                    const isBottleneck = peopleRounded > available;
 
                                     return (
                                     <tr key={sector} className="hover:bg-slate-50">
@@ -877,7 +875,7 @@ export const ManagerDashboard: React.FC = () => {
                                             <span className="text-xl font-black text-slate-700">{peopleRounded}</span>
                                             <span className="text-xs text-slate-400 ml-2">({peopleNeeded.toFixed(1)})</span>
                                         </td>
-                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{availableResources}</td>
+                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{available}</td>
                                         <td className="px-6 py-4 text-center">
                                             {isBottleneck ? (
                                                 <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200 flex items-center justify-center gap-1"><AlertTriangle className="w-3 h-3"/> FALTA MAQ</span>
