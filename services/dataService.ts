@@ -49,15 +49,13 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
         orderBy('timestamp', 'desc')
       );
     } else {
-      // Carga inicial limitada
+      // Carga inicial limitada para no saturar
       q = query(logsRef, orderBy('timestamp', 'desc'), limit(100));
     }
     
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => {
-      // CORRECCIÓN CRÍTICA: 'as any' para evitar error TS2339 en Vercel
-      const data = doc.data() as any; 
-      
+      const data = doc.data() as any;
       return {
         id: doc.id,
         timestamp: data.timestamp || new Date().toISOString(),
@@ -123,9 +121,8 @@ const fetchList = async (docId: string): Promise<string[]> => {
   try {
     const d = await getDocs(collection(db, CONFIG_COL));
     if (d.docs.find(d => d.id === 'lists')) {
-       // CORRECCIÓN: 'as any' para evitar error TS2339
        const listDoc = d.docs.find(d => d.id === 'lists');
-       const data = listDoc?.data() as any;
+       const data = listDoc?.data() as any; 
        return data?.[docId] || []; 
     }
     const docData = d.docs.find(d => d.id === docId);
@@ -175,13 +172,50 @@ export const saveProductivityTarget = async (value: number) => {
   await setDoc(doc(db, CONFIG_COL, 'targets'), { dailyTarget: value }, { merge: true });
 };
 
-// 5. MATRIZ DE PUNTOS
-export const getPointsMatrix = async (): Promise<PointRule[]> => {
+// =========================================================================
+// 5. MATRIZ DE PUNTOS (OPTIMIZADA CON CACHÉ)
+// =========================================================================
+
+export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]> => {
   try {
+    // 1. Intentar leer de la memoria del celular primero (GRATIS)
+    if (!forceRefresh) {
+      const cachedData = localStorage.getItem('cached_matrix');
+      const cachedTime = localStorage.getItem('cached_matrix_time');
+      
+      if (cachedData && cachedTime) {
+        const now = new Date().getTime();
+        const cacheAge = now - parseInt(cachedTime);
+        const oneDay = 24 * 60 * 60 * 1000; 
+        
+        if (cacheAge < oneDay) {
+            // console.log("⚡ Usando Matriz desde Caché (0 lecturas)");
+            return JSON.parse(cachedData);
+        }
+      }
+    }
+
+    // 2. Si no hay caché o es vieja, leemos de Firebase (GASTA LECTURAS)
+    // console.log("🔥 Descargando Matriz de Firebase...");
     const snapshot = await getDocs(collection(db, MATRIX_COL));
+    
     if (snapshot.empty) return [];
-    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PointRule));
-  } catch (error) { return []; }
+    
+    const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PointRule));
+
+    // 3. Guardamos en la memoria del celular para la próxima
+    try {
+      localStorage.setItem('cached_matrix', JSON.stringify(data));
+      localStorage.setItem('cached_matrix_time', new Date().getTime().toString());
+    } catch (e) {
+      console.warn("No se pudo guardar en caché", e);
+    }
+
+    return data;
+  } catch (error) { 
+      console.error("Error matrix:", error); 
+      return []; 
+  }
 };
 
 export const addPointRule = async (rule: PointRule) => {
@@ -265,6 +299,7 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
 // 8. RESTAURACIÓN
 export const restoreSystemFromBackup = async (backupData: any) => {
   try {
+    const batch = writeBatch(db);
     if (backupData.config) {
       if (backupData.config.operators) await saveOperators(backupData.config.operators);
       if (backupData.config.models) await saveModels(backupData.config.models);
@@ -291,11 +326,18 @@ export const restoreSystemFromBackup = async (backupData: any) => {
         await Promise.all(chunk.map(async (log: any) => {
           const ref = log.id ? doc(db, 'production_logs', log.id) : doc(collection(db, 'production_logs'));
           const { id, ...data } = log;
-          const cleanData = { ...data, operator: data.operatorName || data.operator, points: data.totalPoints || data.points };
+          const cleanData = {
+            ...data,
+            operator: data.operatorName || data.operator,
+            points: data.totalPoints || data.points
+          };
           await setDoc(ref, cleanData, { merge: true });
         }));
       }
     }
     return true;
-  } catch (error) { return false; }
+  } catch (error) {
+    console.error("Error crítico en restauración:", error);
+    return false;
+  }
 };
