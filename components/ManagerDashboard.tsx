@@ -80,9 +80,7 @@ export const ManagerDashboard: React.FC = () => {
     const initCatalogs = async () => {
       try {
         const [target, ops, mtx] = await Promise.all([
-          getProductivityTarget(), 
-          getOperators(), 
-          getPointsMatrix()
+          getProductivityTarget(), getOperators(), getPointsMatrix()
         ]);
         setDailyTarget(target || 24960);
         setTempTarget((target || 24960).toString());
@@ -227,7 +225,6 @@ export const ManagerDashboard: React.FC = () => {
         if (!opPointsPerRawSector[log.operatorName]) opPointsPerRawSector[log.operatorName] = {};
         if (!opPointsPerRawSector[log.operatorName][log.sector]) opPointsPerRawSector[log.operatorName][log.sector] = 0;
         opPointsPerRawSector[log.operatorName][log.sector] += log.totalPoints;
-        
         if (!opPoints[log.operatorName]) opPoints[log.operatorName] = 0;
         opPoints[log.operatorName] += log.totalPoints;
     });
@@ -252,7 +249,7 @@ export const ManagerDashboard: React.FC = () => {
 
     const costCenters = ['CORTE', 'COSTURA', 'ARMADO', 'EMBALAJE'];
     
-    const reportData = costCenters.map(cc => {
+    return costCenters.map(cc => {
         const operatorsInCC = Object.keys(opSectorMap).filter(op => opSectorMap[op] === cc);
         let totalCapacity = 0;
         let totalDeclared = 0;
@@ -264,55 +261,42 @@ export const ManagerDashboard: React.FC = () => {
             totalDeclared += declared;
             return { name: op, capacity, declared, efficiency: capacity > 0 ? (declared/capacity)*100 : 0 };
         });
-
         const realProduction = sectorRealProd[cc] || 0;
         const productivity = totalCapacity > 0 ? (realProduction / totalCapacity) * 100 : 0;
-
         return {
-            center: cc,
-            headcount: operatorsInCC.length,
-            capacity: totalCapacity,
-            declared: totalDeclared,
-            real: realProduction,
-            productivity,
-            operators: operatorDetails
+            center: cc, headcount: operatorsInCC.length, capacity: totalCapacity, declared: totalDeclared,
+            real: realProduction, productivity, operators: operatorDetails
         };
     });
-
-    return reportData;
   };
 
   // --- CÁLCULOS 5: SIMULADOR ---
   const getSimulationData = () => {
     if (!simModel || simQty <= 0) return [];
-    
     const rules = matrix.filter(r => r.model === simModel);
     const loadPerSector: Record<string, number> = { 'CORTE':0, 'COSTURA':0, 'ARMADO':0, 'EMBALAJE':0 };
-    
     rules.forEach(r => {
         const cc = normalizeCostCenter(r.sector);
-        if (loadPerSector[cc] !== undefined) {
-            loadPerSector[cc] += (r.pointsPerUnit * simQty);
-        }
+        if (loadPerSector[cc] !== undefined) loadPerSector[cc] += (r.pointsPerUnit * simQty);
     });
-
     const singlePersonCapacity = dailyTarget;
-
+    
+    // CORRECCIÓN DEL ERROR: Ahora availableResources está declarado
     return Object.entries(loadPerSector).map(([sector, points]) => {
         const peopleNeeded = points / singlePersonCapacity;
         const peopleRounded = Math.ceil(peopleNeeded);
         
-        // CORRECCIÓN: Nombre de variable coincidente con el objeto de retorno
+        // Aquí definimos la variable que faltaba
         const availableResources = simResources[sector] || 0;
+        
         const isBottleneck = peopleRounded > availableResources;
-
-        return {
-            sector,
-            pointsRequired: points,
-            peopleNeeded,
-            peopleRounded,
-            availableResources, // Ahora la variable existe y coincide
-            isBottleneck
+        return { 
+            sector, 
+            pointsRequired: points, 
+            peopleNeeded, 
+            peopleRounded, 
+            availableResources, // Ahora sí existe
+            isBottleneck 
         };
     });
   };
@@ -880,8 +864,9 @@ export const ManagerDashboard: React.FC = () => {
                                     const peopleNeeded = points / singlePersonCapacity;
                                     const peopleRounded = Math.ceil(peopleNeeded);
                                     
-                                    // CORRECCIÓN: Nombre de variable coincidente con el objeto de retorno
+                                    // CORRECCIÓN: Definimos la variable ANTES de usarla en el return
                                     const availableResources = simResources[sector] || 0;
+                                    
                                     const isBottleneck = peopleRounded > availableResources;
 
                                     return (
