@@ -1,5 +1,4 @@
 import { ProductionLog } from '../types';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // 1. OBTENCIÓN DE CLAVE SEGURA
 const API_KEY = (import.meta as any).env.VITE_GOOGLE_AI_KEY;
@@ -14,11 +13,12 @@ export const analyzeProductionData = async (
   
   if (!API_KEY) return "⚠️ Error: No se detectó la API Key. Configura VITE_GOOGLE_AI_KEY en Vercel.";
 
-  await new Promise(resolve => setTimeout(resolve, 1500)); // Espera estética
+  // Espera estética
+  await new Promise(resolve => setTimeout(resolve, 1500));
 
   if (logs.length === 0) return "No hay datos suficientes para analizar.";
 
-  // --- PREPARACIÓN DE DATOS (Misma lógica tuya) ---
+  // --- PREPARACIÓN DE DATOS (Misma lógica matemática de siempre) ---
   const uniqueDays = new Set(logs.map(l => l.timestamp.split('T')[0])).size || 1;
   const totalPoints = logs.reduce((sum, log) => sum + log.totalPoints, 0);
   const avgDailyPoints = totalPoints / uniqueDays;
@@ -84,19 +84,34 @@ export const analyzeProductionData = async (
     3. 3 Acciones Recomendadas.
   `;
 
-  // --- LLAMADA A GEMINI (USANDO MODELO COMPATIBLE) ---
+  // --- LLAMADA DIRECTA (SIN LIBRERÍA, REST API PURA) ---
   try {
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    
-    // CAMBIO CLAVE: Usamos "gemini-pro" que falla menos con versiones raras
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    // Usamos 'gemini-1.5-flash' que es rápido y barato
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: fullPrompt }]
+          }]
+        })
+      }
+    );
 
-    const result = await model.generateContent(fullPrompt);
-    const response = await result.response;
-    return response.text();
-    
+    if (!response.ok) {
+       const errorData = await response.json();
+       throw new Error(errorData.error?.message || `Error HTTP: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.candidates[0].content.parts[0].text;
+
   } catch (error) {
-    console.error("Error Gemini:", error);
-    return `❌ Error de conexión con IA. Detalles: ${(error as any).message || "Desconocido"}`;
+    console.error("Error Gemini REST:", error);
+    return `❌ Error de conexión con IA: ${(error as any).message || "Desconocido"}. Revisa la consola.`;
   }
 };
