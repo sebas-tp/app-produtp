@@ -1,119 +1,109 @@
 import { ProductionLog } from '../types';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// 1. OBTENER LA CLAVE DE LA CAJA FUERTE (Vite usa import.meta.env)
+// Asegúrate de que en Vercel la variable se llame IGUAL: VITE_GOOGLE_AI_KEY
+const API_KEY = import.meta.env.VITE_GOOGLE_AI_KEY;
 
 export const analyzeProductionData = async (
   logs: ProductionLog[], 
   allLogs: ProductionLog[], 
   operators: string[], 
   selectedOperator: string,
-  dailyTarget: number // <--- Recibimos la meta para calcular %
+  dailyTarget: number 
 ): Promise<string> => {
   
-  // Simulación de "pensando"
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  // Si no hay clave, avisamos (útil para desarrollo local si no tienes el .env)
+  if (!API_KEY) return "⚠️ Error: No se detectó la API Key de Google. Configura VITE_GOOGLE_AI_KEY.";
 
   if (logs.length === 0) return "No hay datos suficientes para analizar.";
 
-  // --- 1. PREPARACIÓN DE DATOS MATEMÁTICOS ---
+  // --- 1. PREPARACIÓN DE DATOS MATEMÁTICOS (MANTENEMOS TU LÓGICA, ES PERFECTA) ---
+  // (La IA funciona mejor si le das los números ya masticados)
 
-  // Obtener días únicos trabajados en el periodo filtrado
   const uniqueDays = new Set(logs.map(l => l.timestamp.split('T')[0])).size || 1;
-  
-  // Calcular métricas del operario/selección actual
   const totalPoints = logs.reduce((sum, log) => sum + log.totalPoints, 0);
-  const totalQty = logs.reduce((sum, log) => sum + log.quantity, 0);
   const avgDailyPoints = totalPoints / uniqueDays;
   const efficiency = (avgDailyPoints / dailyTarget) * 100;
 
-  // Calcular métricas GLOBALES (Promedio de la planta para comparar)
-  // Filtramos logs dentro del mismo rango de fechas pero de TODOS los operarios
+  // Métricas Globales
   const datesInFilter = new Set(logs.map(l => l.timestamp.split('T')[0]));
   const globalLogsInPeriod = allLogs.filter(l => datesInFilter.has(l.timestamp.split('T')[0]));
   const globalTotalPoints = globalLogsInPeriod.reduce((sum, l) => sum + l.totalPoints, 0);
-  // Un "Día-Operario" es cada vez que un operario trabajó un día
   const operatorDaysCount = new Set(globalLogsInPeriod.map(l => `${l.operatorName}-${l.timestamp.split('T')[0]}`)).size || 1;
   const plantAverageDaily = globalTotalPoints / operatorDaysCount;
 
-  // Agrupación por Operario (Para Ranking)
+  // Ranking Operarios
   const opStats: Record<string, number> = {};
-  globalLogsInPeriod.forEach(l => {
-    opStats[l.operatorName] = (opStats[l.operatorName] || 0) + l.totalPoints;
-  });
-  // Normalizamos por días trabajados de cada uno para ser justos
+  globalLogsInPeriod.forEach(l => { opStats[l.operatorName] = (opStats[l.operatorName] || 0) + l.totalPoints; });
   const opAverageDaily: Record<string, number> = {};
   Object.keys(opStats).forEach(opName => {
     const daysWorked = new Set(globalLogsInPeriod.filter(l => l.operatorName === opName).map(l => l.timestamp.split('T')[0])).size || 1;
     opAverageDaily[opName] = opStats[opName] / daysWorked;
   });
-
-  // Ordenar operarios por rendimiento promedio diario
   const sortedOps = Object.entries(opAverageDaily).sort((a, b) => b[1] - a[1]);
-  const topPerformer = sortedOps[0];
-  const bottomPerformer = sortedOps[sortedOps.length - 1];
+  const topPerformer = sortedOps.length > 0 ? sortedOps[0] : ["N/A", 0];
+  const bottomPerformer = sortedOps.length > 0 ? sortedOps[sortedOps.length - 1] : ["N/A", 0];
 
-  // Agrupación por Sector (Para detectar cuellos de botella)
+  // Cuellos de Botella (Sectores)
   const sectorStats: Record<string, number> = {};
   logs.forEach(l => { sectorStats[l.sector] = (sectorStats[l.sector] || 0) + l.totalPoints; });
-  const sortedSectors = Object.entries(sectorStats).sort((a, b) => a[1] - b[1]); // Menor a mayor
+  const sortedSectors = Object.entries(sectorStats).sort((a, b) => a[1] - b[1]); 
   const weakSector = sortedSectors.length > 0 ? sortedSectors[0][0] : "N/A";
   const strongSector = sortedSectors.length > 0 ? sortedSectors[sortedSectors.length - 1][0] : "N/A";
 
-
-  // --- 2. GENERACIÓN DEL INFORME INTELIGENTE ---
-  let report = `### 🧠 Informe de Inteligencia Operativa\n\n`;
-
-  // === A. ANÁLISIS GLOBAL (Si seleccionó "Todos") ===
-  if (selectedOperator === 'all') {
-    report += `**Visión General de Planta:**\n`;
-    report += `La eficiencia promedio de la planta es del **${((plantAverageDaily / dailyTarget) * 100).toFixed(1)}%** respecto a la meta de ${dailyTarget.toLocaleString()} pts.\n\n`;
-    
-    report += `**⚖️ Dispersión de Rendimiento:**\n`;
-    report += `Existe una brecha notable entre el mejor y el menor rendimiento:\n`;
-    report += `• 🥇 **Líder:** ${topPerformer[0]} con un promedio de ${topPerformer[1].toFixed(0)} pts/día.\n`;
-    report += `• 📉 **Atención:** ${bottomPerformer[0]} con un promedio de ${bottomPerformer[1].toFixed(0)} pts/día.\n\n`;
-
-    report += `**🚩 Detección de Cuellos de Botella:**\n`;
-    report += `El sector **${weakSector}** presenta el menor volumen de puntos acumulados. Se sugiere auditar si faltan operarios en esta estación o si los tiempos asignados en la Matriz de Puntos son correctos.\n`;
+  // --- 2. CONSTRUCCIÓN DEL PROMPT (EL PEDIDO A LA IA) ---
   
-  } 
-  // === B. ANÁLISIS INDIVIDUAL (Si seleccionó a Juan, Benjamin, etc.) ===
-  else {
+  let promptContext = "";
+
+  if (selectedOperator === 'all') {
+    promptContext = `
+      ESTÁS ANALIZANDO A TODA LA PLANTA (GLOBAL).
+      - Eficiencia Promedio Planta: ${((plantAverageDaily / dailyTarget) * 100).toFixed(1)}%
+      - Meta Diaria: ${dailyTarget} pts
+      - Mejor Operario: ${topPerformer[0]} (${topPerformer[1].toFixed(0)} pts/día)
+      - Peor Operario: ${bottomPerformer[0]} (${bottomPerformer[1].toFixed(0)} pts/día)
+      - Sector más débil (Cuello de botella): ${weakSector}
+    `;
+  } else {
     const diffVsAverage = ((avgDailyPoints - plantAverageDaily) / plantAverageDaily) * 100;
-    const diffSign = diffVsAverage > 0 ? "+" : "";
-
-    report += `**Diagnóstico Individual: ${selectedOperator.toUpperCase()}**\n`;
-    report += `Rendimiento Promedio: **${avgDailyPoints.toFixed(0)} pts/día** (${efficiency.toFixed(1)}% de la Meta).\n`;
-    report += `Comparativa con Planta: **${diffSign}${diffVsAverage.toFixed(1)}%** vs el promedio del equipo.\n\n`;
-
-    // --- LÓGICA CONDICIONAL FUERTE (Aquí cambia el mensaje según el %) ---
-    
-    // CASO 1: SUPER ESTRELLA (> 100%)
-    if (efficiency >= 100) {
-      report += `**🌟 Estado: EXCELENTE (High Performer)**\n`;
-      report += `Este operario supera consistentemente la meta diaria. Es un motor clave para la producción.\n`;
-      report += `**Recomendaciones:**\n`;
-      report += `1. **Retención de Talento:** Considere un bono de productividad o reconocimiento público.\n`;
-      report += `2. **Rol de Mentor:** ${selectedOperator} tiene potencial para capacitar a operarios nuevos, especialmente en el sector de ${strongSector}.\n`;
-      report += `3. **Revisión de Calidad:** Solo verifique que la alta velocidad no esté comprometiendo la calidad en ${strongSector}.\n`;
-    }
-    // CASO 2: RENDIMIENTO NORMAL (80% - 99%)
-    else if (efficiency >= 80) {
-      report += `**✅ Estado: ESTÁNDAR (Solid Performer)**\n`;
-      report += `El operario mantiene un ritmo constante y aceptable, aunque hay margen para alcanzar la meta óptima.\n`;
-      report += `**Recomendaciones:**\n`;
-      report += `1. **Ajuste Fino:** El sector ${weakSector} es su punto más bajo. Una breve capacitación técnica podría cerrar la brecha del 20% restante.\n`;
-      report += `2. **Feedback Positivo:** Reconozca su consistencia para mantener la moral alta.\n`;
-    }
-    // CASO 3: BAJO RENDIMIENTO (< 60% - 79%)
-    else {
-      report += `**⚠️ Estado: CRÍTICO (Low Performer)**\n`;
-      report += `El rendimiento está significativamente por debajo de la meta y del promedio de la planta. Esto requiere intervención inmediata.\n`;
-      report += `**Posibles Causas y Acciones:**\n`;
-      report += `1. **Curva de Aprendizaje:** Si es nuevo, ¿está recibiendo el soporte adecuado?\n`;
-      report += `2. **Problema Técnico:** Verifique si las máquinas en ${weakSector} (donde menos produce) tienen fallas frecuentes que él no esté reportando.\n`;
-      report += `3. **Supervisión Directa:** Se recomienda un acompañamiento durante 2 jornadas completas para identificar "tiempos muertos".\n`;
-      report += `4. **Revisión de Datos:** Verifique si está olvidando cargar planillas al final del día (compare con stock físico).\n`;
-    }
+    promptContext = `
+      ESTÁS ANALIZANDO AL OPERARIO: ${selectedOperator.toUpperCase()}.
+      - Su Promedio: ${avgDailyPoints.toFixed(0)} pts/día
+      - Meta Diaria: ${dailyTarget} pts
+      - Su Eficiencia Personal: ${efficiency.toFixed(1)}%
+      - Comparación vs Promedio Planta: ${diffVsAverage > 0 ? '+' : ''}${diffVsAverage.toFixed(1)}%
+      - Su Sector más fuerte: ${strongSector}
+      - Su Sector más débil: ${weakSector}
+    `;
   }
 
-  return report;
+  const fullPrompt = `
+    Actúa como un Ingeniero Industrial Senior y Gerente de Planta experto en eficiencia operativa y recursos humanos.
+    
+    Analiza los siguientes datos de producción reales:
+    ${promptContext}
+
+    Instrucciones de respuesta:
+    1. Usa formato Markdown (negritas, listas).
+    2. Sé profesional pero directo. Usa emojis para resaltar puntos clave (🧠, ⚠️, 🚀).
+    3. Si la eficiencia es baja (<80%), sé crítico y sugiere causas (falta capacitación, ocio, fallas máquina).
+    4. Si la eficiencia es alta (>100%), sugiere premios o mentoría.
+    5. NO inventes números que no te di. Básate en los datos proporcionados.
+    6. Estructura: "Diagnóstico", "Análisis de Datos", "3 Acciones Recomendadas".
+  `;
+
+  // --- 3. LLAMADA REAL A GEMINI ---
+  try {
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Modelo rápido y barato
+
+    const result = await model.generateContent(fullPrompt);
+    const response = await result.response;
+    return response.text();
+    
+  } catch (error) {
+    console.error("Error llamando a Gemini:", error);
+    return "❌ Error al conectar con la Inteligencia Artificial. Por favor verifica tu conexión o la clave API.";
+  }
 };
