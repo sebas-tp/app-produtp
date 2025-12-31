@@ -20,7 +20,7 @@
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",
     "html2canvas": "^1.4.1",
-    "@google/generative-ai": "^0.1.3"
+    "@google/generative-ai": "^0.14.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.56",
