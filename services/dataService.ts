@@ -334,58 +334,67 @@ export const restoreSystemFromBackup = async (backupData: any) => {
 };
 
 // =======================================================
-// 9. SCRIPT DE CORRECCIÓN DE DATOS (MEJORADO v2.0)
+// 9. SCRIPT DE CORRECCIÓN DE DATOS (SUPER MEJORADO v3.0)
 // =======================================================
 export const fixDatabaseData = async () => {
   try {
-    console.log("🚀 Iniciando limpieza PROFUNDA de base de datos...");
+    console.log("🚀 Iniciando limpieza Y NORMALIZACIÓN de mayúsculas...");
     const snapshot = await getDocs(collection(db, MATRIX_COL));
     const batch = writeBatch(db);
     let count = 0;
 
     snapshot.docs.forEach((docSnap) => {
       const data = docSnap.data() as PointRule;
-      const op = data.operation.trim(); // Limpiamos espacios
-      
-      // --- DETECCIÓN INTELIGENTE ---
-      // 1. Caso exacto: "2m", "1.5m", "10m"
-      const isSimpleMeasure = /^\d+(\.\d+)?m$/i.test(op);
-      
-      // 2. Caso compuesto: "1m OR", "4m OR", "2m REFORZADO" 
-      // (Detecta si EMPIEZA con numero+m y sigue con algo más)
-      const isComplexMeasure = /^\d+(\.\d+)?m\s+.*$/i.test(op);
+      let currentOp = data.operation.trim();
+      let currentModel = data.model;
+      let needsUpdate = false;
+
+      // 1. DETECCIÓN DE MEDIDAS (2m, 4m OR, etc) -> Mover al Modelo
+      const isSimpleMeasure = /^\d+(\.\d+)?m$/i.test(currentOp);
+      const isComplexMeasure = /^\d+(\.\d+)?m\s+.*$/i.test(currentOp); // Detecta "1m OR"
 
       if (isSimpleMeasure || isComplexMeasure) {
-        // Corrección: Mover todo el texto de la operación al modelo
-        const newModel = `${data.model} ${op}`; // ej: "eslingas 6tn" + " " + "1m OR"
-        const newOperation = data.sector; // ej: "Armado"
+        currentModel = `${data.model} ${currentOp}`; // Movemos medida al modelo
+        currentOp = data.sector.toLowerCase(); // Ponemos el sector como operación (EN MINÚSCULA)
+        needsUpdate = true;
+      }
 
+      // 2. CORRECCIÓN DE MAYÚSCULAS (El problema de "Costura")
+      // Si la operación es "Costura", "Armado", etc. (con Mayúscula), la pasamos a minúscula
+      const badCapitalization = ["Costura", "Armado", "Corte", "Embalaje", "Limpieza", "Empaque"];
+      
+      if (badCapitalization.includes(currentOp)) {
+        currentOp = currentOp.toLowerCase(); // "Costura" -> "costura"
+        needsUpdate = true;
+      }
+
+      // 3. Aplicar cambios si es necesario
+      if (needsUpdate) {
         const docRef = doc(db, MATRIX_COL, docSnap.id);
         batch.update(docRef, {
-          model: newModel,
-          operation: newOperation
+          model: currentModel,
+          operation: currentOp
         });
-        
-        console.log(`🔧 Corregido: [${data.model}] + [${op}] -> [${newModel}]`);
+        // console.log(`🔧 Arreglando: ${data.model} -> Op: ${currentOp}`);
         count++;
       }
     });
 
     if (count > 0) {
       await batch.commit();
-      console.log(`✅ ¡Éxito! Se corrigieron ${count} registros automáticamente.`);
-      alert(`✅ Se corrigieron ${count} registros erróneos (incluyendo los 'OR').`);
+      console.log(`✅ ¡Éxito! Se corrigieron ${count} registros.`);
+      alert(`✅ Se arreglaron ${count} registros (Mayúsculas y Medidas).`);
     } else {
-      console.log("👍 No se encontraron registros con ese error.");
-      alert("👍 No se encontraron más errores de medidas en las operaciones.");
+      console.log("👍 Todo limpio.");
+      alert("👍 La base de datos ya está limpia y en minúsculas.");
     }
     
-    // Limpiamos caché para ver los cambios
+    // Limpiamos caché
     localStorage.removeItem('cached_matrix');
     localStorage.removeItem('cached_matrix_time');
 
   } catch (error) {
-    console.error("Error en script de limpieza:", error);
-    alert("Hubo un error al intentar corregir los datos.");
+    console.error("Error script:", error);
+    alert("Error al corregir datos.");
   }
 };
