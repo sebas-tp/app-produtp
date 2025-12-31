@@ -18,7 +18,7 @@ export const analyzeProductionData = async (
 
   if (logs.length === 0) return "No hay datos suficientes para analizar.";
 
-  // --- PREPARACIÓN DE DATOS (Misma lógica matemática de siempre) ---
+  // --- PREPARACIÓN DE DATOS (Misma lógica matemática) ---
   const uniqueDays = new Set(logs.map(l => l.timestamp.split('T')[0])).size || 1;
   const totalPoints = logs.reduce((sum, log) => sum + log.totalPoints, 0);
   const avgDailyPoints = totalPoints / uniqueDays;
@@ -84,11 +84,11 @@ export const analyzeProductionData = async (
     3. 3 Acciones Recomendadas.
   `;
 
-  // --- LLAMADA DIRECTA (SIN LIBRERÍA, REST API PURA) ---
+  // --- LLAMADA DIRECTA (SIN LIBRERÍA, MODELO "GEMINI-PRO") ---
   try {
-    // Usamos 'gemini-1.5-flash' que es rápido y barato
+    // CAMBIO IMPORTANTE: Usamos 'gemini-pro' en lugar de 'flash'. Este modelo SIEMPRE está disponible.
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`,
       {
         method: 'POST',
         headers: {
@@ -104,14 +104,21 @@ export const analyzeProductionData = async (
 
     if (!response.ok) {
        const errorData = await response.json();
+       // Esto nos dirá exactamente qué pasa si vuelve a fallar
        throw new Error(errorData.error?.message || `Error HTTP: ${response.status}`);
     }
 
     const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
+    
+    // Verificamos que la respuesta tenga la estructura correcta
+    if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
+        return data.candidates[0].content.parts[0].text;
+    } else {
+        return "⚠️ La IA respondió, pero no generó texto. Intenta de nuevo.";
+    }
 
   } catch (error) {
     console.error("Error Gemini REST:", error);
-    return `❌ Error de conexión con IA: ${(error as any).message || "Desconocido"}. Revisa la consola.`;
+    return `❌ Error de conexión con IA: ${(error as any).message || "Desconocido"}.`;
   }
 };
