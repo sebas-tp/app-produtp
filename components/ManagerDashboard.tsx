@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { 
   getLogs, clearLogs, downloadCSV, downloadPDF, 
   getProductivityTarget, saveProductivityTarget, getOperators,
-  getPointsMatrix 
+  getPointsMatrix, fixDatabaseData // <--- Importamos la nueva función
 } from '../services/dataService';
 import { analyzeProductionData } from '../services/geminiService';
 import { ProductionLog, Sector, PointRule } from '../types';
@@ -132,7 +132,7 @@ export const ManagerDashboard: React.FC = () => {
     setLoading(false);
   };
 
-  // --- HELPER: NORMALIZAR SECTORES ---
+  // --- CÁLCULOS (Mismos de siempre) ---
   const normalizeCostCenter = (sectorName: string) => {
     const s = sectorName.toUpperCase();
     if (s.includes('CORTE')) return 'CORTE';
@@ -142,7 +142,6 @@ export const ManagerDashboard: React.FC = () => {
     return 'OTROS';
   };
 
-  // --- CÁLCULOS 1: MÉTRICAS ---
   const dailyTrend = Object.values(filteredLogs.reduce((acc, log) => {
     const date = log.timestamp.split('T')[0]; 
     const shortDate = new Date(log.timestamp).toLocaleDateString(undefined, {day: '2-digit', month: '2-digit'});
@@ -168,7 +167,6 @@ export const ManagerDashboard: React.FC = () => {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
 
-  // --- CÁLCULOS 2: EFICIENCIA ---
   const getEfficiencyData = () => {
     const opStats = Object.values(filteredLogs.reduce((acc, log) => {
         if (!acc[log.operatorName]) {
@@ -206,7 +204,6 @@ export const ManagerDashboard: React.FC = () => {
     return detailedStats.sort((a, b) => b.performancePct - a.performancePct);
   };
 
-  // --- CÁLCULOS 3: AUDITORÍA (TANGO) ---
   const getAuditData = () => {
     const modelsInLogs = Array.from(new Set(filteredLogs.map(l => l.model)));
     return modelsInLogs.map(modelName => {
@@ -220,7 +217,6 @@ export const ManagerDashboard: React.FC = () => {
     }).sort((a, b) => b.declaredPoints - a.declaredPoints);
   };
 
-  // --- CÁLCULOS 4: CONTABILIDAD ---
   const getAccountingData = () => {
     const opSectorMap: Record<string, string> = {};
     const opPoints: Record<string, number> = {};
@@ -275,7 +271,6 @@ export const ManagerDashboard: React.FC = () => {
     });
   };
 
-  // --- CÁLCULOS 5: SIMULADOR ---
   const getSimulationData = () => {
     if (!simModel || simQty <= 0) return [];
     const rules = matrix.filter(r => r.model === simModel);
@@ -302,7 +297,6 @@ export const ManagerDashboard: React.FC = () => {
     });
   };
 
-  // --- VARIABLES DE CÁLCULO ---
   const auditData = getAuditData();
   const efficiencyData = getEfficiencyData();
   const accountingData = getAccountingData();
@@ -468,9 +462,20 @@ export const ManagerDashboard: React.FC = () => {
                 <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm outline-none text-slate-700"/>
             </div>
             <div className="flex gap-2">
+                <button 
+                  onClick={() => {
+                    if(confirm("⚠ ¿Estás seguro de ejecutar la CORRECCIÓN AUTOMÁTICA de datos?\n\nEsto buscará operaciones como '2m', '10m', etc., y las moverá al nombre del Modelo.\n\nEsta acción modificará la base de datos.")) {
+                      fixDatabaseData().then(() => refreshData());
+                    }
+                  }} 
+                  className="p-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 border border-purple-200 font-bold" 
+                  title="🪄 Corregir Datos Malos (2m, 4m...)"
+                >
+                  🪄 Corregir Datos
+                </button>
                 <button onClick={handleSmartExcel} className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200" title="Excel"><FileDown className="w-5 h-5" /></button>
                 <button onClick={handleSmartPDF} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="PDF"><FileText className="w-5 h-5" /></button>
-                <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200"><RefreshCw className="w-5 h-5" /></button>
+                <button onClick={refreshData} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200" title="Refrescar Datos (Forzar descarga)"><RefreshCw className="w-5 h-5" /></button>
                 <div className="h-8 w-px bg-slate-300 mx-1"></div>
                 <button onClick={handleEngineeringAccess} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAuthorized ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
                     {isAuthorized ? <BrainCircuit className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
@@ -479,10 +484,11 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* PESTAÑA 1: MÉTRICAS */}
+      {/* RESTO DE TABS (SIN CAMBIOS) */}
+      {/* ... PESTAÑA 1: MÉTRICAS ... */}
       {activeTab === 'metrics' && (
         <div className="space-y-6 animate-in fade-in">
-            {/* KPI CARDS REDISEÑADAS */}
+            {/* KPI CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-xl shadow-md border border-slate-700 text-white md:col-span-1">
                     <div className="flex justify-between items-start mb-2">
@@ -491,6 +497,7 @@ export const ManagerDashboard: React.FC = () => {
                     </div>
                     {isEditingTarget ? <input type="number" value={tempTarget} onChange={(e) => setTempTarget(e.target.value)} className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xl font-bold w-full text-white" autoFocus /> : <p className="text-3xl font-black mt-1 tracking-tight">{dailyTarget.toLocaleString()} <span className="text-sm font-normal text-slate-400">pts</span></p>}
                 </div>
+                {/* ... Resto de KPIs ... */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500">
                     <p className="text-xs text-slate-500 font-bold uppercase flex items-center gap-2"><Box className="w-4 h-4 text-blue-500"/> Declarado (App)</p>
                     <p className="text-3xl font-bold text-blue-600 mt-2">{totalDeclaredPoints.toLocaleString('es-AR', {maximumFractionDigits:0})}</p>
@@ -606,6 +613,7 @@ export const ManagerDashboard: React.FC = () => {
       {/* PESTAÑA 2: EFICIENCIA */}
       {activeTab === 'efficiency' && (
          <div className="animate-in fade-in space-y-6">
+            {/* Contenido eficiencia (sin cambios) */}
             <div className="bg-indigo-50 p-6 rounded-xl shadow-md border-l-4 border-indigo-600">
                 <div className="flex justify-between items-start">
                     <div>
@@ -681,6 +689,7 @@ export const ManagerDashboard: React.FC = () => {
                     <input type="text" placeholder="Buscar modelo..." className="pl-9 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-sm" value={auditSearch} onChange={(e) => setAuditSearch(e.target.value)}/>
                 </div>
             </div>
+            {/* ... Resto de la tabla de auditoría ... */}
             <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -706,7 +715,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 4: CONTABILIDAD (NUEVO DRILL-DOWN) */}
+      {/* PESTAÑA 4: CONTABILIDAD (SIN CAMBIOS) */}
       {activeTab === 'accounting' && (
         <div className="animate-in fade-in space-y-6">
             {/* KPI Cards Contables */}
@@ -798,7 +807,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* PESTAÑA 5: SIMULADOR (ACTUALIZADA CON RESTRICCIONES) */}
+      {/* PESTAÑA 5: SIMULADOR (SIN CAMBIOS) */}
       {activeTab === 'simulator' && (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-orange-50 p-6 rounded-xl shadow-md border-l-4 border-orange-600">
@@ -864,8 +873,11 @@ export const ManagerDashboard: React.FC = () => {
                                 return Object.entries(loadPerSector).map(([sector, points]) => {
                                     const peopleNeeded = points / singlePersonCapacity;
                                     const peopleRounded = Math.ceil(peopleNeeded);
-                                    const available = simResources[sector] || 0;
-                                    const isBottleneck = peopleRounded > available;
+                                    
+                                    // CORRECCIÓN: Definimos la variable ANTES de usarla en el return
+                                    const availableResources = simResources[sector] || 0;
+                                    
+                                    const isBottleneck = peopleRounded > availableResources;
 
                                     return (
                                     <tr key={sector} className="hover:bg-slate-50">
@@ -875,7 +887,7 @@ export const ManagerDashboard: React.FC = () => {
                                             <span className="text-xl font-black text-slate-700">{peopleRounded}</span>
                                             <span className="text-xs text-slate-400 ml-2">({peopleNeeded.toFixed(1)})</span>
                                         </td>
-                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{available}</td>
+                                        <td className="px-6 py-4 text-center font-mono text-slate-500">{availableResources}</td>
                                         <td className="px-6 py-4 text-center">
                                             {isBottleneck ? (
                                                 <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200 flex items-center justify-center gap-1"><AlertTriangle className="w-3 h-3"/> FALTA MAQ</span>
@@ -894,7 +906,7 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODALES se mantienen igual */}
+      {/* MODALES (SIN CAMBIOS) */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
