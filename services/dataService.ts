@@ -334,24 +334,30 @@ export const restoreSystemFromBackup = async (backupData: any) => {
 };
 
 // =======================================================
-// 9. SCRIPT DE CORRECCIÓN DE DATOS (NUEVO)
+// 9. SCRIPT DE CORRECCIÓN DE DATOS (MEJORADO v2.0)
 // =======================================================
 export const fixDatabaseData = async () => {
   try {
-    console.log("🚀 Iniciando limpieza de base de datos...");
+    console.log("🚀 Iniciando limpieza PROFUNDA de base de datos...");
     const snapshot = await getDocs(collection(db, MATRIX_COL));
     const batch = writeBatch(db);
     let count = 0;
 
     snapshot.docs.forEach((docSnap) => {
       const data = docSnap.data() as PointRule;
+      const op = data.operation.trim(); // Limpiamos espacios
       
-      // PATRÓN: Si la operación parece una medida (ej: "2m", "1.5m", "10m")
-      const isMeasurement = /^\d+(\.\d+)?m$/.test(data.operation.trim());
+      // --- DETECCIÓN INTELIGENTE ---
+      // 1. Caso exacto: "2m", "1.5m", "10m"
+      const isSimpleMeasure = /^\d+(\.\d+)?m$/i.test(op);
+      
+      // 2. Caso compuesto: "1m OR", "4m OR", "2m REFORZADO" 
+      // (Detecta si EMPIEZA con numero+m y sigue con algo más)
+      const isComplexMeasure = /^\d+(\.\d+)?m\s+.*$/i.test(op);
 
-      if (isMeasurement) {
-        // Corrección: Mover medida al modelo y poner sector en operación
-        const newModel = `${data.model} ${data.operation}`; // ej: "eslingas 6tn 2m"
+      if (isSimpleMeasure || isComplexMeasure) {
+        // Corrección: Mover todo el texto de la operación al modelo
+        const newModel = `${data.model} ${op}`; // ej: "eslingas 6tn" + " " + "1m OR"
         const newOperation = data.sector; // ej: "Armado"
 
         const docRef = doc(db, MATRIX_COL, docSnap.id);
@@ -360,7 +366,7 @@ export const fixDatabaseData = async () => {
           operation: newOperation
         });
         
-        // console.log(`🔧 Corrigiendo: ${data.model} -> ${newModel}`);
+        console.log(`🔧 Corregido: [${data.model}] + [${op}] -> [${newModel}]`);
         count++;
       }
     });
@@ -368,10 +374,10 @@ export const fixDatabaseData = async () => {
     if (count > 0) {
       await batch.commit();
       console.log(`✅ ¡Éxito! Se corrigieron ${count} registros automáticamente.`);
-      alert(`✅ Se corrigieron ${count} registros erróneos en la base de datos.`);
+      alert(`✅ Se corrigieron ${count} registros erróneos (incluyendo los 'OR').`);
     } else {
       console.log("👍 No se encontraron registros con ese error.");
-      alert("👍 No se encontraron registros para corregir. La base de datos parece limpia.");
+      alert("👍 No se encontraron más errores de medidas en las operaciones.");
     }
     
     // Limpiamos caché para ver los cambios
