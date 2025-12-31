@@ -30,7 +30,7 @@ const NEWS_COL = 'news';
 const MATRIX_COL = 'points_matrix';
 const DEFAULT_TARGET = 24960;
 
-// 3. GESTIÓN DE LOGS (OPTIMIZADO)
+// 3. GESTIÓN DE LOGS (OPTIMIZADO CON LIMIT 10)
 export const getLogs = async (startDate?: string, endDate?: string): Promise<ProductionLog[]> => {
   try {
     const logsRef = collection(db, LOGS_COL);
@@ -49,7 +49,7 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
         orderBy('timestamp', 'desc')
       );
     } else {
-      // Carga inicial limitada para no saturar
+      // Carga inicial limitada para operarios (Ahorro máximo)
       q = query(logsRef, orderBy('timestamp', 'desc'), limit(10));
     }
     
@@ -172,13 +172,9 @@ export const saveProductivityTarget = async (value: number) => {
   await setDoc(doc(db, CONFIG_COL, 'targets'), { dailyTarget: value }, { merge: true });
 };
 
-// =========================================================================
-// 5. MATRIZ DE PUNTOS (OPTIMIZADA CON CACHÉ)
-// =========================================================================
-
+// 5. MATRIZ DE PUNTOS (CON CACHÉ)
 export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]> => {
   try {
-    // 1. Intentar leer de la memoria del celular primero (GRATIS)
     if (!forceRefresh) {
       const cachedData = localStorage.getItem('cached_matrix');
       const cachedTime = localStorage.getItem('cached_matrix_time');
@@ -189,21 +185,16 @@ export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]
         const oneDay = 24 * 60 * 60 * 1000; 
         
         if (cacheAge < oneDay) {
-            // console.log("⚡ Usando Matriz desde Caché (0 lecturas)");
             return JSON.parse(cachedData);
         }
       }
     }
 
-    // 2. Si no hay caché o es vieja, leemos de Firebase (GASTA LECTURAS)
-    // console.log("🔥 Descargando Matriz de Firebase...");
     const snapshot = await getDocs(collection(db, MATRIX_COL));
-    
     if (snapshot.empty) return [];
     
     const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PointRule));
 
-    // 3. Guardamos en la memoria del celular para la próxima
     try {
       localStorage.setItem('cached_matrix', JSON.stringify(data));
       localStorage.setItem('cached_matrix_time', new Date().getTime().toString());
@@ -339,5 +330,56 @@ export const restoreSystemFromBackup = async (backupData: any) => {
   } catch (error) {
     console.error("Error crítico en restauración:", error);
     return false;
+  }
+};
+
+// =======================================================
+// 9. SCRIPT DE CORRECCIÓN DE DATOS (NUEVO)
+// =======================================================
+export const fixDatabaseData = async () => {
+  try {
+    console.log("🚀 Iniciando limpieza de base de datos...");
+    const snapshot = await getDocs(collection(db, MATRIX_COL));
+    const batch = writeBatch(db);
+    let count = 0;
+
+    snapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data() as PointRule;
+      
+      // PATRÓN: Si la operación parece una medida (ej: "2m", "1.5m", "10m")
+      const isMeasurement = /^\d+(\.\d+)?m$/.test(data.operation.trim());
+
+      if (isMeasurement) {
+        // Corrección: Mover medida al modelo y poner sector en operación
+        const newModel = `${data.model} ${data.operation}`; // ej: "eslingas 6tn 2m"
+        const newOperation = data.sector; // ej: "Armado"
+
+        const docRef = doc(db, MATRIX_COL, docSnap.id);
+        batch.update(docRef, {
+          model: newModel,
+          operation: newOperation
+        });
+        
+        // console.log(`🔧 Corrigiendo: ${data.model} -> ${newModel}`);
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      console.log(`✅ ¡Éxito! Se corrigieron ${count} registros automáticamente.`);
+      alert(`✅ Se corrigieron ${count} registros erróneos en la base de datos.`);
+    } else {
+      console.log("👍 No se encontraron registros con ese error.");
+      alert("👍 No se encontraron registros para corregir. La base de datos parece limpia.");
+    }
+    
+    // Limpiamos caché para ver los cambios
+    localStorage.removeItem('cached_matrix');
+    localStorage.removeItem('cached_matrix_time');
+
+  } catch (error) {
+    console.error("Error en script de limpieza:", error);
+    alert("Hubo un error al intentar corregir los datos.");
   }
 };
