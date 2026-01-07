@@ -81,6 +81,51 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
   }
 };
 
+// --- NUEVA FUNCIÓN: CARGA POR DEMANDA (SOLUCIONA EL CALENDARIO VACÍO) ---
+export const getLogsByDate = async (dateString: string): Promise<ProductionLog[]> => {
+  try {
+    const logsRef = collection(db, LOGS_COL);
+    
+    // Rango exacto del día seleccionado (00:00 a 23:59)
+    const start = `${dateString}T00:00:00`;
+    const end = `${dateString}T23:59:59.999`;
+
+    const q = query(
+      logsRef,
+      where('timestamp', '>=', start),
+      where('timestamp', '<=', end),
+      orderBy('timestamp', 'desc')
+    );
+    
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data() as any;
+      return {
+        id: doc.id,
+        timestamp: data.timestamp || new Date().toISOString(),
+        createdAt: data.timestamp || new Date().toISOString(),
+        date: data.date || '',
+        operatorName: data.operatorName || data.operator || 'Desconocido',
+        operator: data.operatorName || data.operator || 'Desconocido',
+        sector: data.sector,
+        model: data.model,
+        operation: data.operation,
+        quantity: Number(data.quantity),
+        totalPoints: Number(data.totalPoints || data.points || 0),
+        points: Number(data.totalPoints || data.points || 0),
+        startTime: data.startTime || '',
+        endTime: data.endTime || '',
+        orderNumber: data.orderNumber || '',
+        comments: data.comments || '' 
+      } as ProductionLog;
+    });
+  } catch (error) {
+    console.error("Error fetching logs by date:", error);
+    return [];
+  }
+};
+
 export const getProductionLogs = () => getLogs(); 
 
 export const saveLog = async (log: any) => {
@@ -306,7 +351,7 @@ export const restoreSystemFromBackup = async (backupData: any) => {
     if (backupData.news && Array.isArray(backupData.news)) {
       for (const item of backupData.news) {
         const ref = doc(db, 'news', item.id);
-        const { id, ...data } = item;
+        const { id, ...data } = item; 
         await setDoc(ref, data, { merge: true });
       }
     }
@@ -334,7 +379,7 @@ export const restoreSystemFromBackup = async (backupData: any) => {
 };
 
 // =======================================================
-// 9. SCRIPT DE CORRECCIÓN DE DATOS (SUPER MEJORADO v3.0)
+// 9. SCRIPT DE CORRECCIÓN DE DATOS
 // =======================================================
 export const fixDatabaseData = async () => {
   try {
@@ -359,8 +404,7 @@ export const fixDatabaseData = async () => {
         needsUpdate = true;
       }
 
-      // 2. CORRECCIÓN DE MAYÚSCULAS (El problema de "Costura")
-      // Si la operación es "Costura", "Armado", etc. (con Mayúscula), la pasamos a minúscula
+      // 2. CORRECCIÓN DE MAYÚSCULAS
       const badCapitalization = ["Costura", "Armado", "Corte", "Embalaje", "Limpieza", "Empaque"];
       
       if (badCapitalization.includes(currentOp)) {
@@ -375,7 +419,6 @@ export const fixDatabaseData = async () => {
           model: currentModel,
           operation: currentOp
         });
-        // console.log(`🔧 Arreglando: ${data.model} -> Op: ${currentOp}`);
         count++;
       }
     });
