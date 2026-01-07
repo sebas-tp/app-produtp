@@ -4,14 +4,15 @@ import {
   getPointRuleSync, saveLog, getLogs, 
   getOperators, getModels, getOperations, getPointsMatrix, downloadCSV,
   updateProductionLog, deleteProductionLog, 
-  getProductivityTarget, getActiveNews, NewsItem 
+  getProductivityTarget, getActiveNews, NewsItem,
+  getLogsByDate // <--- IMPORTANTE: Importamos la función de carga por fecha
 } from '../services/dataService';
 import { 
   Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
   Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp, Search, ChevronDown 
 } from 'lucide-react';
 
-// --- COMPONENTE DE SELECCIÓN CON BUSCADOR (NUEVO) ---
+// --- COMPONENTE DE SELECCIÓN CON BUSCADOR ---
 interface SearchableSelectProps {
   label: string;
   options: string[];
@@ -26,12 +27,10 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({ label, options, val
   const [searchTerm, setSearchTerm] = useState('');
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Filtrar opciones basado en lo que escribe el usuario
   const filteredOptions = options.filter(opt => 
     opt.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Cerrar si hace clic fuera del componente
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
@@ -44,7 +43,7 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({ label, options, val
 
   const handleOpen = () => {
     if (disabled) return;
-    setSearchTerm(''); // Limpiar búsqueda al abrir
+    setSearchTerm(''); 
     setIsOpen(!isOpen);
   };
 
@@ -58,7 +57,6 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({ label, options, val
     <div className="relative" ref={wrapperRef}>
       <label className="block text-sm font-bold text-slate-700 mb-1 uppercase">{label}</label>
       
-      {/* El "Input" que se ve siempre */}
       <div 
         onClick={handleOpen}
         className={`w-full rounded-lg border border-slate-300 p-3 flex justify-between items-center bg-white cursor-pointer ${disabled ? 'opacity-60 bg-slate-100 cursor-not-allowed' : 'hover:border-blue-400 focus:ring-2 focus:ring-blue-500'} transition-all`}
@@ -69,10 +67,8 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({ label, options, val
         <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </div>
 
-      {/* La lista desplegable con buscador */}
       {isOpen && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          {/* Campo de Búsqueda */}
           <div className="p-2 border-b border-slate-100 bg-slate-50 sticky top-0">
             <div className="flex items-center bg-white border border-slate-300 rounded-lg px-2">
               <Search className="w-4 h-4 text-slate-400" />
@@ -87,7 +83,6 @@ const SearchableSelect: React.FC<SearchableSelectProps> = ({ label, options, val
             </div>
           </div>
           
-          {/* Lista de Opciones */}
           <div className="max-h-60 overflow-y-auto custom-scrollbar">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt, idx) => (
@@ -162,19 +157,31 @@ export const OperatorForm: React.FC = () => {
 
   useEffect(() => { if (!isLoading) loadLogsByDate(); }, [formData.operatorName, selectedDate]);
 
+  // --- FUNCIÓN MEJORADA: CARGA INTELIGENTE ---
   const loadLogsByDate = async () => {
-    const allLogs = await getLogs();
+    // 1. CARGAR TABLA: Trae solo los datos de la fecha elegida (Lazy Loading)
+    // Esto asegura que si cambia la fecha, vea los datos reales aunque no estén en caché inicial
+    const logsFromDB = await getLogsByDate(selectedDate);
     
-    const filtered = allLogs.filter(log => {
-      const logDate = log.timestamp.split('T')[0];
-      const matchesOperator = formData.operatorName ? log.operatorName === formData.operatorName : true;
-      return logDate === selectedDate && matchesOperator;
+    // Filtrar visualmente por operario si hay uno seleccionado
+    const filteredView = logsFromDB.filter(log => {
+      return formData.operatorName ? log.operatorName === formData.operatorName : true;
     });
-    setCurrentViewLogs(filtered);
+    
+    setCurrentViewLogs(filteredView);
 
+    // 2. CARGAR HISTORIAL: Combina caché (getLogs) con lo nuevo para llenar el gráfico
     if (formData.operatorName) {
+      const cachedLogs = await getLogs(); // Trae lo optimizado (limit 10)
+      
+      // Combinamos caché + lo que acabamos de traer de DB para tener más data histórica
+      const combinedLogs = [...cachedLogs, ...logsFromDB];
+      
+      // Eliminamos duplicados usando ID
+      const uniqueLogs = Array.from(new Map(combinedLogs.map(item => [item.id, item])).values());
+
       const groupedData: Record<string, number> = {};
-      const opLogs = allLogs.filter(l => l.operatorName === formData.operatorName);
+      const opLogs = uniqueLogs.filter(l => l.operatorName === formData.operatorName);
       
       opLogs.forEach(log => {
         const date = log.timestamp.split('T')[0];
@@ -184,7 +191,7 @@ export const OperatorForm: React.FC = () => {
       const historyArray = Object.entries(groupedData)
         .map(([date, points]) => ({ date, points }))
         .sort((a, b) => b.date.localeCompare(a.date))
-        .slice(0, 5);
+        .slice(0, 5); // Últimos 5 días
 
       setOperatorHistory(historyArray);
     }
@@ -260,7 +267,7 @@ export const OperatorForm: React.FC = () => {
       await loadLogsByDate();
       
       setEditingId(null); 
-      setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' }));
+      setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' })); 
       
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err) { console.error(err); setStatus('error'); } finally { setIsSaving(false); }
