@@ -12,7 +12,7 @@ import { Sector, PointRule, ProductionLog } from '../types';
 import { 
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
-  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search // <--- Search Importado
+  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search 
 } from 'lucide-react';
 
 // --- COMPONENTE GESTOR DE LISTAS (CON BUSCADOR) ---
@@ -84,7 +84,7 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
         <button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 disabled:opacity-50"><Plus className="w-5 h-5" /></button>
       </div>
 
-      {/* INPUT BUSCAR (NUEVO) */}
+      {/* INPUT BUSCAR */}
       <div className="relative mb-2">
         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>
         <input 
@@ -137,7 +137,7 @@ export const AdminPanel: React.FC = () => {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
-  const [matrixSearch, setMatrixSearch] = useState(''); // <--- BUSCADOR MATRIZ
+  const [matrixSearch, setMatrixSearch] = useState(''); 
 
   const [activeNews, setActiveNews] = useState<NewsItem[]>([]);
   const [newsForm, setNewsForm] = useState({ title: '', content: '', duration: '24' });
@@ -156,6 +156,27 @@ export const AdminPanel: React.FC = () => {
       ]);
       setOperators(ops); setModels(mods); setOperations(opers); setMatrix(mtx); setActiveNews(news); setLogs(productionLogs);
     } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+
+  // --- NUEVA FUNCIÓN: FORZAR ACTUALIZACIÓN ---
+  const handleForceUpdate = () => {
+    if(window.confirm("¿Estás seguro?\n\nEsto recargará el sistema para bajar la última versión y limpiar memorias viejas.")) {
+      // 1. Borrar caché de datos (LocalStorage)
+      localStorage.removeItem('cached_matrix');
+      localStorage.removeItem('cached_matrix_time');
+      
+      // 2. Borrar caché de la App (Service Worker) si existe
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          names.forEach((name) => {
+            caches.delete(name);
+          });
+        });
+      }
+
+      // 3. Recargar página
+      window.location.reload();
+    }
   };
 
   const handleSaveOperators = async (newList: string[]) => { await saveOperators(newList); setOperators(newList); };
@@ -286,12 +307,25 @@ export const AdminPanel: React.FC = () => {
   return (
     <div className="space-y-6 pb-20">
       <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md border-l-4 border-orange-600">
-        <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
-        <div className="flex flex-wrap gap-4 mt-6">
-          <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
-          <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz de Puntos</button>
-          <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
-          <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Datos & Backup</button>
+        <div className="flex flex-col md:flex-row justify-between md:items-start gap-4">
+            <div>
+                <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
+                <div className="flex flex-wrap gap-4 mt-6">
+                <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
+                <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz de Puntos</button>
+                <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
+                <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Datos & Backup</button>
+                </div>
+            </div>
+            {/* BOTÓN DE ACTUALIZACIÓN FORZADA */}
+            <button 
+                onClick={handleForceUpdate}
+                className="bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all shadow-sm"
+                title="Usar si no se ven los cambios recientes"
+            >
+                <RefreshCw className="w-4 h-4" />
+                ACTUALIZAR SISTEMA
+            </button>
         </div>
       </div>
 
@@ -351,7 +385,7 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
           
-          {/* BUSCADOR MATRIZ (NUEVO) */}
+          {/* BUSCADOR MATRIZ */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center gap-3">
              <Search className="w-5 h-5 text-slate-400"/>
              <input 
@@ -448,7 +482,7 @@ export const AdminPanel: React.FC = () => {
                 </button>
               </div>
 
-              {/* 2. RESTAURAR (EL NUEVO UI QUE FALTABA) */}
+              {/* 2. RESTAURAR */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-red-100 relative overflow-hidden">
                 <div className="absolute top-0 right-0 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-bl">PELIGRO</div>
                 <h4 className="font-bold text-slate-700 mb-2">2. Restaurar Sistema</h4>
@@ -507,7 +541,7 @@ export const AdminPanel: React.FC = () => {
 
           <hr className="border-slate-200" />
 
-          {/* SECCIÓN 2: CARGA MASIVA (TU HERRAMIENTA ANTIGUA) */}
+          {/* SECCIÓN 2: CARGA MASIVA */}
           <div>
             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><FileJson className="w-6 h-6 text-indigo-600"/> Gestión Diaria: Importar Catálogo</h3>
             <div className="bg-white p-6 rounded-xl shadow-sm border border-indigo-100">
