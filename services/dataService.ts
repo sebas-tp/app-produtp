@@ -81,7 +81,7 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
   }
 };
 
-// --- NUEVA FUNCIÓN: CARGA POR DEMANDA (SOLUCIONA EL CALENDARIO VACÍO) ---
+// --- CARGA POR DEMANDA (SOLUCIONA EL CALENDARIO VACÍO) ---
 export const getLogsByDate = async (dateString: string): Promise<ProductionLog[]> => {
   try {
     const logsRef = collection(db, LOGS_COL);
@@ -217,7 +217,7 @@ export const saveProductivityTarget = async (value: number) => {
   await setDoc(doc(db, CONFIG_COL, 'targets'), { dailyTarget: value }, { merge: true });
 };
 
-// 5. MATRIZ DE PUNTOS (CON CACHÉ)
+// 5. MATRIZ DE PUNTOS (CON CACHÉ INTELIGENTE)
 export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]> => {
   try {
     if (!forceRefresh) {
@@ -254,18 +254,29 @@ export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]
   }
 };
 
+// --- AQUÍ ESTÁ EL CAMBIO IMPORTANTE: LIMPIEZA DE CACHÉ AL GUARDAR ---
+
 export const addPointRule = async (rule: PointRule) => {
   const { id, ...data } = rule;
   await addDoc(collection(db, MATRIX_COL), data);
+  // Borramos caché para obligar a descargar la lista nueva
+  localStorage.removeItem('cached_matrix');
+  localStorage.removeItem('cached_matrix_time');
 };
 
 export const updatePointRule = async (rule: PointRule) => {
   const { id, ...data } = rule;
   await updateDoc(doc(db, MATRIX_COL, id!), data);
+  // Borramos caché
+  localStorage.removeItem('cached_matrix');
+  localStorage.removeItem('cached_matrix_time');
 };
 
 export const deletePointRule = async (id: string) => {
   await deleteDoc(doc(db, MATRIX_COL, id));
+  // Borramos caché
+  localStorage.removeItem('cached_matrix');
+  localStorage.removeItem('cached_matrix_time');
 };
 
 export const getPointRuleSync = (matrix: PointRule[], sector: Sector | string, model: string, operation: string) => {
