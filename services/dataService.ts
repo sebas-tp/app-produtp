@@ -254,7 +254,7 @@ export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]
   }
 };
 
-// --- AQUÍ ESTÁ EL CAMBIO IMPORTANTE: LIMPIEZA DE CACHÉ AL GUARDAR ---
+// --- LIMPIEZA DE CACHÉ AL GUARDAR ---
 
 export const addPointRule = async (rule: PointRule) => {
   const { id, ...data } = rule;
@@ -450,5 +450,71 @@ export const fixDatabaseData = async () => {
   } catch (error) {
     console.error("Error script:", error);
     alert("Error al corregir datos.");
+  }
+};
+
+// --- NUEVA FUNCIÓN: RECÁLCULO MASIVO (MANTENIMIENTO) ---
+export const recalculateAllHistory = async () => {
+  try {
+    console.log("🔄 Iniciando recálculo masivo...");
+    
+    // 1. Traemos TODOS los logs (sin el limite de 10)
+    // Hacemos una query explícita para evitar el limit(10) de la función getLogs por defecto
+    const allLogsQuery = query(collection(db, LOGS_COL), orderBy('timestamp', 'desc'));
+    const snapshot = await getDocs(allLogsQuery);
+    const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionLog));
+
+    // 2. Traemos la Matriz Actualizada
+    const matrix = await getPointsMatrix(true); // true = Forzar descarga fresca
+    
+    const batch = writeBatch(db);
+    let updateCount = 0;
+    let batchCount = 0;
+
+    // 3. Recorremos cada registro
+    for (const log of logs) {
+      // Buscamos si existe una regla para este Log
+      const rule = matrix.find(r => 
+        r.sector === log.sector && 
+        r.model === log.model && 
+        r.operation === log.operation
+      );
+
+      if (rule) {
+        // Calculamos cuánto DEBERÍA valer
+        const correctPoints = rule.pointsPerUnit * log.quantity;
+        
+        // Comparamos con flotantes (márgen de error 0.01)
+        // También verificamos si vale 0 y ahora debería tener valor
+        if (Math.abs(correctPoints - log.totalPoints) > 0.01) {
+          const ref = doc(db, LOGS_COL, log.id!);
+          
+          // Preparamos la actualización
+          batch.update(ref, { 
+            totalPoints: correctPoints,
+            points: correctPoints 
+          });
+          
+          updateCount++;
+          batchCount++;
+        }
+      }
+      
+      // Firebase solo permite 500 escrituras por lote
+      if (batchCount >= 400) {
+        await batch.commit();
+        batchCount = 0; 
+      }
+    }
+
+    // 4. Guardamos los pendientes finales
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+
+    return updateCount; 
+  } catch (error) {
+    console.error("Error en recálculo:", error);
+    throw error;
   }
 };
