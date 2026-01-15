@@ -6,7 +6,8 @@ import {
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
   addNews, deleteNews, getActiveNews, NewsItem,
   deleteOperatorWithData, getLogs,
-  restoreSystemFromBackup 
+  restoreSystemFromBackup,
+  recalculateAllHistory // <--- IMPORTAMOS LA NUEVA FUNCIÓN
 } from '../services/dataService';
 import { Sector, PointRule, ProductionLog } from '../types';
 import { 
@@ -539,6 +540,44 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
 
+          <hr className="border-slate-200" />
+
+          {/* SECCIÓN NUEVA: RECÁLCULO DE PUNTOS */}
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <RefreshCw className="w-6 h-6 text-blue-600"/> Mantenimiento: Recálculo de Puntos
+            </h3>
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-100">
+              <p className="text-sm text-slate-500 mb-4">
+                Utilice esta función si modificó valores en la Matriz de Puntos y desea que esos cambios 
+                <span className="font-bold text-blue-600"> se apliquen retroactivamente </span> 
+                a todo el historial de producción ya cargado.
+              </p>
+              
+              <button 
+                onClick={async () => {
+                  if(window.confirm("¿Recalcular TODO el historial basándose en la Matriz actual?")) {
+                    setLoading(true);
+                    try {
+                      const count = await recalculateAllHistory();
+                      alert(`✅ Proceso terminado.\n\nSe actualizaron ${count} registros con los nuevos valores.`);
+                      await loadData(); // Recargamos para ver cambios
+                    } catch (e) {
+                      alert("Error al recalcular.");
+                    } finally {
+                      setLoading(false);
+                    }
+                  }
+                }} 
+                disabled={loading}
+                className="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-blue-700 flex justify-center items-center gap-2"
+              >
+                {loading ? <Loader2 className="animate-spin w-5 h-5"/> : <RefreshCw className="w-5 h-5"/>} 
+                {loading ? 'Calculando...' : 'RECALCULAR HISTORIAL COMPLETO'}
+              </button>
+            </div>
+          </div>
+          
           <hr className="border-slate-200" />
 
           {/* SECCIÓN 2: CARGA MASIVA */}
