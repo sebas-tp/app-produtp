@@ -12,6 +12,17 @@ import {
   Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp, Search, ChevronDown, Filter 
 } from 'lucide-react';
 
+// --- UTILIDAD PARA FECHAS (EVITA EL ERROR DE ZONA HORARIA) ---
+const formatDate = (dateString: string) => {
+  if (!dateString) return '-';
+  const parts = dateString.split('-'); // "2026-01-22"
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}`; // "22/01/2026"
+  }
+  return dateString;
+};
+
 // --- COMPONENTE DE SELECCIÓN CON BUSCADOR ---
 interface SearchableSelectProps {
   label: string;
@@ -150,12 +161,7 @@ export const OperatorForm: React.FC = () => {
     const avgGeneral = totalPointsAll / operatorHistory.length;
 
     // 2. Promedio PURO (Simula la selección de Excel)
-    // CRITERIO: Un día es "Puro" solo si:
-    // A) Tiene producción (> 0 puntos)
-    // B) NO TIENE tareas sin precio (hasUnrated === false)
-    // Esto elimina los días donde hicieron "un poco de corte y mucha limpieza".
     const pureDays = operatorHistory.filter(day => day.points > 0 && !day.hasUnrated);
-    
     const totalPointsPure = pureDays.reduce((acc, day) => acc + day.points, 0);
     const avgProductive = pureDays.length > 0 ? totalPointsPure / pureDays.length : 0;
 
@@ -199,26 +205,20 @@ export const OperatorForm: React.FC = () => {
       opLogs.forEach(log => {
         const date = log.timestamp.split('T')[0];
         
-        // Inicializamos el día si no existe
         if (!groupedData[date]) {
           groupedData[date] = { points: 0, hasUnrated: false };
         }
-
-        // Sumamos puntos
         groupedData[date].points += log.totalPoints;
 
-        // DETECTIVE: ¿Esta tarea es "basura" para el promedio? (0 puntos pero cantidad > 0)
-        // Si encontramos UNA sola tarea así en el día, marcamos el día como "Contaminado/Mixto"
         if (log.totalPoints === 0 && log.quantity > 0) {
           groupedData[date].hasUnrated = true;
         }
       });
 
-      // Convertimos a array para la gráfica
       const historyArray = Object.entries(groupedData)
         .map(([date, data]) => ({ date, points: data.points, hasUnrated: data.hasUnrated }))
         .sort((a, b) => b.date.localeCompare(a.date))
-        .slice(0, 15); // Tomamos los últimos 15 días activos
+        .slice(0, 30); 
 
       setOperatorHistory(historyArray);
     }
@@ -440,12 +440,14 @@ export const OperatorForm: React.FC = () => {
       {formData.operatorName && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
-          {/* TARJETA 1: PROGRESO DEL DÍA SELECCIONADO */}
+          {/* TARJETA 1: PROGRESO DEL DÍA SELECCIONADO (CORREGIDA FECHA) */}
           <div className="bg-white rounded-xl shadow-md p-6 border border-slate-200 h-full flex flex-col justify-center">
             <div className="flex justify-between items-end mb-2">
               <div>
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Target className="w-5 h-5 text-amber-600" />Meta Diaria: {dailyTarget.toLocaleString()} pts</h3>
-                <p className="text-sm text-slate-500">Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">{selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : new Date(selectedDate).toLocaleDateString()}</span></p>
+                <p className="text-sm text-slate-500">
+                  Progreso de {formData.operatorName} - <span className="font-bold text-slate-700">{selectedDate === new Date().toISOString().split('T')[0] ? "Hoy" : formatDate(selectedDate)}</span>
+                </p>
               </div>
               <div className={`text-2xl font-black ${isGoalReached ? 'text-green-600' : 'text-slate-700'}`}>{progressPercent.toFixed(1)}%</div>
             </div>
@@ -486,13 +488,13 @@ export const OperatorForm: React.FC = () => {
                  <tbody className="divide-y divide-slate-50">
                    {operatorHistory.map((day, idx) => {
                      const dayPercent = (day.points / dailyTarget) * 100;
-                     // Marcamos visualmente los días que son ignorados en el promedio puro
                      const isIgnored = day.points === 0 || day.hasUnrated;
                      
                      return (
                        <tr key={idx} className={`hover:bg-slate-50 ${isIgnored ? 'bg-slate-50/50 text-slate-400' : ''}`}>
+                         {/* CORREGIDA LA FECHA EN LA TABLA */}
                          <td className="px-6 py-2 font-medium">
-                           {new Date(day.date).toLocaleDateString()}
+                           {formatDate(day.date)}
                            {day.hasUnrated && <span className="ml-2 text-[9px] bg-slate-200 text-slate-500 px-1 rounded" title="Día con tareas sin precio (excluido)">MIXTO</span>}
                          </td>
                          <td className="px-6 py-2 text-right">{day.points.toLocaleString()}</td>
@@ -519,7 +521,7 @@ export const OperatorForm: React.FC = () => {
       {formData.operatorName && (
         <div className="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50">
-            <div><h3 className="font-bold text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-amber-600" /> Detalle de Tareas ({selectedDate})</h3></div>
+            <div><h3 className="font-bold text-slate-800 flex items-center gap-2"><History className="w-5 h-5 text-amber-600" /> Detalle de Tareas ({formatDate(selectedDate)})</h3></div>
             <div className="flex items-center gap-2">
                 <button onClick={handleDownload} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm" disabled={currentViewLogs.length === 0}><FileDown className="w-4 h-4" /> Excel</button>
             </div>
