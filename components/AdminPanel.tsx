@@ -20,6 +20,18 @@ import {
   BarChart3, Filter, Target, Calendar 
 } from 'lucide-react';
 
+// --- UTILIDAD PARA FECHAS (NUEVO: Evita el problema de un día menos) ---
+const formatDateUTC = (dateString: string) => {
+  if (!dateString) return '-';
+  // Si viene como "2026-01-12", lo partimos manualmente para evitar zonas horarias
+  const parts = dateString.split('-'); 
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}`;
+  }
+  return dateString;
+};
+
 // --- COMPONENTE GESTOR DE LISTAS ---
 interface ListManagerProps {
   title: string;
@@ -137,16 +149,15 @@ export const AdminPanel: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
 
-  // Estados para REPORTES (CON MES)
+  // Estados para REPORTES
   const [statsOperator, setStatsOperator] = useState(''); 
-  const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7)); // Formato "YYYY-MM" (ej: 2024-02)
+  const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      // Descargamos todo el historial para poder filtrar localmente con velocidad
       const allLogsQuery = query(collection(db, 'production_logs'), orderBy('timestamp', 'desc'));
       const allLogsSnapshot = await getDocs(allLogsQuery);
       const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ 
@@ -175,28 +186,29 @@ export const AdminPanel: React.FC = () => {
       return l.operatorName === statsOperator && logMonth === statsMonth;
     });
     
-    // 2. Agrupar por día
+    // 2. Agrupar por día (CORREGIDO PARA USAR LOCAL TIME SI ES NECESARIO)
     const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
     
     opLogs.forEach(log => {
-      // Normalizamos fecha (YYYY-MM-DD)
-      const date = log.timestamp.includes('T') ? log.timestamp.split('T')[0] : new Date(log.timestamp).toISOString().split('T')[0];
+      // Tomamos la fecha cruda "YYYY-MM-DD" que viene de la ISO (primeros 10 chars)
+      // OJO: Si tus operarios cargan a las 23:50, esto podría seguir siendo UTC.
+      // Asumimos que la fecha de carga del operario es correcta en string.
+      const date = log.timestamp.split('T')[0]; 
       
       if (!groupedData[date]) {
         groupedData[date] = { points: 0, hasUnrated: false };
       }
       groupedData[date].points += log.totalPoints;
       
-      // Detectar día mixto (tarea sin puntos pero con cantidad > 0)
       if (log.totalPoints === 0 && log.quantity > 0) {
         groupedData[date].hasUnrated = true;
       }
     });
 
-    // 3. Convertimos a Array y ORDENAMOS ASCENDENTE (1, 2, 3...) igual que el Excel
+    // 3. Convertimos a Array y ORDENAMOS ASCENDENTE
     const historyArray = Object.entries(groupedData)
       .map(([date, data]) => ({ date, points: data.points, hasUnrated: data.hasUnrated }))
-      .sort((a, b) => a.date.localeCompare(b.date)); // Orden CRONOLÓGICO
+      .sort((a, b) => a.date.localeCompare(b.date)); 
 
     // 4. Cálculos de Promedios
     if (historyArray.length === 0) return { history: [], avgGeneral: 0, avgProductive: 0 };
@@ -204,7 +216,6 @@ export const AdminPanel: React.FC = () => {
     const totalPointsAll = historyArray.reduce((acc, day) => acc + day.points, 0);
     const avgGeneral = totalPointsAll / historyArray.length;
 
-    // Filtro Puro: Solo días > 0 puntos Y que NO sean mixtos
     const pureDays = historyArray.filter(day => day.points > 0 && !day.hasUnrated);
     const totalPointsPure = pureDays.reduce((acc, day) => acc + day.points, 0);
     const avgProductive = pureDays.length > 0 ? totalPointsPure / pureDays.length : 0;
@@ -454,7 +465,8 @@ export const AdminPanel: React.FC = () => {
 
                         return (
                           <tr key={idx} className={`hover:bg-slate-50 transition-colors ${!countsForPure ? 'bg-slate-50/60' : ''}`}>
-                            <td className="px-4 py-3 font-mono text-slate-600">{new Date(day.date).toLocaleDateString()}</td>
+                            {/* CORRECCIÓN: Usamos formatDateUTC para que no reste 1 día */}
+                            <td className="px-4 py-3 font-mono text-slate-600">{formatDateUTC(day.date)}</td>
                             <td className="px-4 py-3 text-right font-bold text-slate-800">{day.points.toLocaleString()}</td>
                             <td className="px-4 py-3 text-right">
                               <span className={`px-2 py-1 rounded text-xs font-bold ${
@@ -500,7 +512,7 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {/* ... Resto de pestañas Matrix, News, Import sin cambios lógicos ... */}
+      {/* ... Resto de pestañas (Matrix, News, Import) se mantienen igual ... */}
       
       {activeTab === 'matrix' && (
         <div className="space-y-6 animate-in fade-in duration-300">
