@@ -5,11 +5,11 @@ import {
   getOperators, getModels, getOperations, getPointsMatrix, downloadCSV,
   updateProductionLog, deleteProductionLog, 
   getProductivityTarget, getActiveNews, NewsItem,
-  getLogsByDate // <--- IMPORTANTE: Importamos la función de carga por fecha
+  getLogsByDate 
 } from '../services/dataService';
 import { 
   Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
-  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp, Search, ChevronDown 
+  Pencil, X, RefreshCw, Trophy, Target, Calendar, Megaphone, Hash, Trash2, MessageSquare, TrendingUp, Search, ChevronDown, Filter 
 } from 'lucide-react';
 
 // --- COMPONENTE DE SELECCIÓN CON BUSCADOR ---
@@ -141,6 +141,32 @@ export const OperatorForm: React.FC = () => {
   const progressPercent = dailyTarget > 0 ? (totalPointsView / dailyTarget) * 100 : 0;
   const isGoalReached = progressPercent >= 100;
 
+  // --- LÓGICA INTELIGENTE DE PROMEDIOS (FILTRA DÍAS MIXTOS) ---
+  const stats = React.useMemo(() => {
+    if (operatorHistory.length === 0) return { avgGeneral: 0, avgProductive: 0, activeDays: 0, mixedDays: 0 };
+
+    // 1. Promedio SIMPLE (Cuenta todo, incluso días malos o mixtos)
+    const totalPointsAll = operatorHistory.reduce((acc, day) => acc + day.points, 0);
+    const avgGeneral = totalPointsAll / operatorHistory.length;
+
+    // 2. Promedio PURO (Simula la selección de Excel)
+    // CRITERIO: Un día es "Puro" solo si:
+    // A) Tiene producción (> 0 puntos)
+    // B) NO TIENE tareas sin precio (hasUnrated === false)
+    // Esto elimina los días donde hicieron "un poco de corte y mucha limpieza".
+    const pureDays = operatorHistory.filter(day => day.points > 0 && !day.hasUnrated);
+    
+    const totalPointsPure = pureDays.reduce((acc, day) => acc + day.points, 0);
+    const avgProductive = pureDays.length > 0 ? totalPointsPure / pureDays.length : 0;
+
+    return { 
+      avgGeneral: (avgGeneral / dailyTarget) * 100, 
+      avgProductive: (avgProductive / dailyTarget) * 100,
+      activeDays: pureDays.length,
+      mixedDays: operatorHistory.length - pureDays.length
+    };
+  }, [operatorHistory, dailyTarget]);
+
   useEffect(() => {
     const initData = async () => {
       setIsLoading(true);
@@ -157,41 +183,42 @@ export const OperatorForm: React.FC = () => {
 
   useEffect(() => { if (!isLoading) loadLogsByDate(); }, [formData.operatorName, selectedDate]);
 
-  // --- FUNCIÓN MEJORADA: CARGA INTELIGENTE ---
   const loadLogsByDate = async () => {
-    // 1. CARGAR TABLA: Trae solo los datos de la fecha elegida (Lazy Loading)
-    // Esto asegura que si cambia la fecha, vea los datos reales aunque no estén en caché inicial
     const logsFromDB = await getLogsByDate(selectedDate);
-    
-    // Filtrar visualmente por operario si hay uno seleccionado
-    const filteredView = logsFromDB.filter(log => {
-      return formData.operatorName ? log.operatorName === formData.operatorName : true;
-    });
-    
+    const filteredView = logsFromDB.filter(log => formData.operatorName ? log.operatorName === formData.operatorName : true);
     setCurrentViewLogs(filteredView);
 
-    // 2. CARGAR HISTORIAL: Combina caché (getLogs) con lo nuevo para llenar el gráfico
     if (formData.operatorName) {
-      const cachedLogs = await getLogs(); // Trae lo optimizado (limit 10)
-      
-      // Combinamos caché + lo que acabamos de traer de DB para tener más data histórica
+      const cachedLogs = await getLogs(); 
       const combinedLogs = [...cachedLogs, ...logsFromDB];
-      
-      // Eliminamos duplicados usando ID
       const uniqueLogs = Array.from(new Map(combinedLogs.map(item => [item.id, item])).values());
 
-      const groupedData: Record<string, number> = {};
+      const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
       const opLogs = uniqueLogs.filter(l => l.operatorName === formData.operatorName);
       
       opLogs.forEach(log => {
         const date = log.timestamp.split('T')[0];
-        groupedData[date] = (groupedData[date] || 0) + log.totalPoints;
+        
+        // Inicializamos el día si no existe
+        if (!groupedData[date]) {
+          groupedData[date] = { points: 0, hasUnrated: false };
+        }
+
+        // Sumamos puntos
+        groupedData[date].points += log.totalPoints;
+
+        // DETECTIVE: ¿Esta tarea es "basura" para el promedio? (0 puntos pero cantidad > 0)
+        // Si encontramos UNA sola tarea así en el día, marcamos el día como "Contaminado/Mixto"
+        if (log.totalPoints === 0 && log.quantity > 0) {
+          groupedData[date].hasUnrated = true;
+        }
       });
 
+      // Convertimos a array para la gráfica
       const historyArray = Object.entries(groupedData)
-        .map(([date, points]) => ({ date, points }))
+        .map(([date, data]) => ({ date, points: data.points, hasUnrated: data.hasUnrated }))
         .sort((a, b) => b.date.localeCompare(a.date))
-        .slice(0, 5); // Últimos 5 días
+        .slice(0, 15); // Tomamos los últimos 15 días activos
 
       setOperatorHistory(historyArray);
     }
@@ -208,7 +235,6 @@ export const OperatorForm: React.FC = () => {
     setEditingId(log.id!);
     const logDate = log.timestamp.split('T')[0];
     setSelectedDate(logDate);
-    
     setFormData({ 
       operatorName: log.operatorName, 
       sector: log.sector as Sector, 
@@ -265,10 +291,8 @@ export const OperatorForm: React.FC = () => {
 
       setStatus('success');
       await loadLogsByDate();
-      
       setEditingId(null); 
       setFormData(prev => ({ ...prev, quantity: '', model: '', operation: '', comments: '' })); 
-      
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err) { console.error(err); setStatus('error'); } finally { setIsSaving(false); }
   };
@@ -326,8 +350,6 @@ export const OperatorForm: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
-            {/* 1. SELECTOR CON BUSCADOR: OPERARIO */}
             <SearchableSelect 
               label="Operario Responsable" 
               options={operatorList} 
@@ -336,7 +358,6 @@ export const OperatorForm: React.FC = () => {
               placeholder="Buscar nombre..."
               disabled={!!editingId}
             />
-            
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1 uppercase flex items-center gap-1">
                 <Hash className="w-4 h-4 text-slate-400"/> N° Orden / Lote
@@ -360,8 +381,6 @@ export const OperatorForm: React.FC = () => {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
-            {/* 2. SELECTOR CON BUSCADOR: MODELO */}
             <SearchableSelect 
               label="Modelo / Producto" 
               options={modelList} 
@@ -369,8 +388,6 @@ export const OperatorForm: React.FC = () => {
               onChange={(val) => setFormData(prev => ({ ...prev, model: val }))}
               placeholder="Buscar modelo..."
             />
-
-            {/* 3. SELECTOR CON BUSCADOR: OPERACIÓN */}
             <SearchableSelect 
               label="Operación Realizada" 
               options={operationList} 
@@ -424,7 +441,7 @@ export const OperatorForm: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
           {/* TARJETA 1: PROGRESO DEL DÍA SELECCIONADO */}
-          <div className="bg-white rounded-xl shadow-md p-6 border border-slate-200 h-full">
+          <div className="bg-white rounded-xl shadow-md p-6 border border-slate-200 h-full flex flex-col justify-center">
             <div className="flex justify-between items-end mb-2">
               <div>
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Target className="w-5 h-5 text-amber-600" />Meta Diaria: {dailyTarget.toLocaleString()} pts</h3>
@@ -436,38 +453,64 @@ export const OperatorForm: React.FC = () => {
             {isGoalReached && <div className="mt-2 flex items-center gap-2 text-green-700 font-bold text-sm animate-bounce"><Trophy className="w-4 h-4" /> ¡Objetivo Cumplido!</div>}
           </div>
 
-          {/* TARJETA 2: NUEVA TABLA DE RENDIMIENTO DIARIO */}
+          {/* TARJETA 2: HISTORIAL Y PROMEDIOS COMPARATIVOS (MEJORADO) */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden border border-slate-200 h-full">
              <div className="px-6 py-3 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-blue-600"/>
-                <h3 className="font-bold text-slate-800">Mi Rendimiento Reciente</h3>
+                <h3 className="font-bold text-slate-800">Mi Rendimiento Reciente (15 Días)</h3>
              </div>
-             <table className="w-full text-sm">
-               <thead className="bg-white text-xs text-slate-500 uppercase border-b border-slate-100">
-                 <tr>
-                   <th className="px-6 py-2 text-left">Fecha</th>
-                   <th className="px-6 py-2 text-right">Puntos</th>
-                   <th className="px-6 py-2 text-right">Efic. %</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-50">
-                 {operatorHistory.map((day, idx) => {
-                   const dayPercent = (day.points / dailyTarget) * 100;
-                   return (
-                     <tr key={idx} className="hover:bg-slate-50">
-                       <td className="px-6 py-2 font-medium text-slate-700">{new Date(day.date).toLocaleDateString()}</td>
-                       <td className="px-6 py-2 text-right">{day.points.toLocaleString()}</td>
-                       <td className="px-6 py-2 text-right">
-                         <span className={`px-2 py-1 rounded text-xs font-bold ${dayPercent >= 100 ? 'bg-green-100 text-green-700' : (dayPercent >= 80 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')}`}>
-                           {dayPercent.toFixed(0)}%
-                         </span>
-                       </td>
-                     </tr>
-                   );
-                 })}
-                 {operatorHistory.length === 0 && <tr><td colSpan={3} className="px-6 py-4 text-center text-slate-400 italic">Sin registros previos.</td></tr>}
-               </tbody>
-             </table>
+             
+             {/* --- NUEVO BLOQUE DE MÉTRICAS COMPARATIVAS --- */}
+             <div className="grid grid-cols-2 gap-2 p-3 bg-blue-50/50 border-b border-slate-100">
+               <div className="bg-white p-2 rounded border border-slate-200 text-center shadow-sm opacity-70">
+                 <div className="text-[10px] uppercase font-bold text-slate-400">Promedio Bruto</div>
+                 <div className="text-lg font-bold text-slate-500">{stats.avgGeneral.toFixed(0)}%</div>
+                 <div className="text-[9px] text-slate-400">Incluye todo</div>
+               </div>
+               <div className="bg-white p-2 rounded border border-blue-300 text-center shadow-md ring-1 ring-blue-100">
+                 <div className="text-[10px] uppercase font-bold text-blue-600 flex justify-center items-center gap-1"><Filter className="w-3 h-3"/> Prom. Puro</div>
+                 <div className="text-xl font-black text-blue-700">{stats.avgProductive.toFixed(0)}%</div>
+                 <div className="text-[9px] text-blue-500 font-medium">Excluye días mixtos/sin pts</div>
+               </div>
+             </div>
+
+             <div className="max-h-48 overflow-y-auto custom-scrollbar">
+               <table className="w-full text-sm">
+                 <thead className="bg-white text-xs text-slate-500 uppercase border-b border-slate-100 sticky top-0">
+                   <tr>
+                     <th className="px-6 py-2 text-left bg-slate-50">Fecha</th>
+                     <th className="px-6 py-2 text-right bg-slate-50">Puntos</th>
+                     <th className="px-6 py-2 text-right bg-slate-50">Efic. %</th>
+                   </tr>
+                 </thead>
+                 <tbody className="divide-y divide-slate-50">
+                   {operatorHistory.map((day, idx) => {
+                     const dayPercent = (day.points / dailyTarget) * 100;
+                     // Marcamos visualmente los días que son ignorados en el promedio puro
+                     const isIgnored = day.points === 0 || day.hasUnrated;
+                     
+                     return (
+                       <tr key={idx} className={`hover:bg-slate-50 ${isIgnored ? 'bg-slate-50/50 text-slate-400' : ''}`}>
+                         <td className="px-6 py-2 font-medium">
+                           {new Date(day.date).toLocaleDateString()}
+                           {day.hasUnrated && <span className="ml-2 text-[9px] bg-slate-200 text-slate-500 px-1 rounded" title="Día con tareas sin precio (excluido)">MIXTO</span>}
+                         </td>
+                         <td className="px-6 py-2 text-right">{day.points.toLocaleString()}</td>
+                         <td className="px-6 py-2 text-right">
+                           <span className={`px-2 py-1 rounded text-xs font-bold ${
+                             isIgnored ? 'bg-slate-100 text-slate-400' : 
+                             (dayPercent >= 100 ? 'bg-green-100 text-green-700' : (dayPercent >= 80 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'))
+                           }`}>
+                             {dayPercent.toFixed(0)}%
+                           </span>
+                         </td>
+                       </tr>
+                     );
+                   })}
+                   {operatorHistory.length === 0 && <tr><td colSpan={3} className="px-6 py-4 text-center text-slate-400 italic">Sin registros previos.</td></tr>}
+                 </tbody>
+               </table>
+             </div>
           </div>
         </div>
       )}
