@@ -1,22 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   getOperators, saveOperators, 
   getModels, saveModels, 
   getOperations, saveOperations, 
   getPointsMatrix, addPointRule, deletePointRule, updatePointRule,
   addNews, deleteNews, getActiveNews, NewsItem,
-  deleteOperatorWithData, getLogs,
+  deleteOperatorWithData, 
   restoreSystemFromBackup,
-  recalculateAllHistory // <--- IMPORTAMOS LA NUEVA FUNCIÓN
+  recalculateAllHistory,
+  getProductivityTarget 
 } from '../services/dataService';
+import { db } from '../services/dataService'; 
+import { collection, getDocs, query, orderBy } from 'firebase/firestore'; 
 import { Sector, PointRule, ProductionLog } from '../types';
 import { 
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
-  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search 
+  FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search,
+  BarChart3, Filter, Target, Calendar 
 } from 'lucide-react';
 
-// --- COMPONENTE GESTOR DE LISTAS (CON BUSCADOR) ---
+// --- COMPONENTE GESTOR DE LISTAS ---
 interface ListManagerProps {
   title: string;
   data: string[];
@@ -30,8 +34,6 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
   const [saving, setSaving] = useState(false);
   const [editingItem, setEditingItem] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
-  
-  // ESTADO DEL BUSCADOR LOCAL
   const [searchTerm, setSearchTerm] = useState('');
 
   const handleAdd = async () => {
@@ -64,40 +66,24 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
     setEditingItem(null); setEditValue(''); setSaving(false);
   };
 
-  // FILTRADO EN TIEMPO REAL
-  const filteredData = data.filter(item => 
-    item.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredData = data.filter(item => item.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-full relative flex flex-col">
       {saving && <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center"><Loader2 className="animate-spin text-orange-600"/></div>}
-      
       <div className="flex items-center gap-2 mb-4 text-slate-800">
           <Icon className="w-5 h-5 text-orange-600" />
           <h3 className="font-bold">{title}</h3>
           <span className="ml-auto text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">{data.length}</span>
       </div>
-
-      {/* INPUT AGREGAR */}
       <div className="flex gap-2 mb-4">
         <input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm outline-none text-slate-900 focus:ring-2 focus:ring-orange-200" />
         <button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 disabled:opacity-50"><Plus className="w-5 h-5" /></button>
       </div>
-
-      {/* INPUT BUSCAR */}
       <div className="relative mb-2">
         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>
-        <input 
-            type="text" 
-            placeholder="Buscar..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 outline-none focus:border-blue-300 transition-colors"
-        />
+        <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 outline-none focus:border-blue-300 transition-colors"/>
       </div>
-
-      {/* LISTA FILTRADA */}
       <div className="space-y-2 max-h-80 overflow-y-auto pr-1 custom-scrollbar flex-1">
         {filteredData.map((item) => (
           <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group transition-colors ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
@@ -126,7 +112,7 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
 
 // --- MAIN COMPONENT ---
 export const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'lists' | 'matrix' | 'news' | 'import'>('lists');
+  const [activeTab, setActiveTab] = useState<'lists' | 'matrix' | 'news' | 'import' | 'stats'>('stats');
   const [loading, setLoading] = useState(true);
   
   const [operators, setOperators] = useState<string[]>([]);
@@ -135,47 +121,110 @@ export const AdminPanel: React.FC = () => {
   
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [logs, setLogs] = useState<ProductionLog[]>([]);
+  const [dailyTarget, setDailyTarget] = useState<number>(24960);
 
+  // Estados para Edición
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
   const [matrixSearch, setMatrixSearch] = useState(''); 
 
+  // Estados para Noticias
   const [activeNews, setActiveNews] = useState<NewsItem[]>([]);
   const [newsForm, setNewsForm] = useState({ title: '', content: '', duration: '24' });
 
+  // Estados para Import/Export
   const [jsonImport, setJsonImport] = useState('');
   const [importing, setImporting] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+
+  // Estados para REPORTES (CON MES)
+  const [statsOperator, setStatsOperator] = useState(''); 
+  const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7)); // Formato "YYYY-MM" (ej: 2024-02)
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [ops, mods, opers, mtx, news, productionLogs] = await Promise.all([
-        getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getLogs()
+      // Descargamos todo el historial para poder filtrar localmente con velocidad
+      const allLogsQuery = query(collection(db, 'production_logs'), orderBy('timestamp', 'desc'));
+      const allLogsSnapshot = await getDocs(allLogsQuery);
+      const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      } as ProductionLog));
+
+      const [ops, mods, opers, mtx, news, target] = await Promise.all([
+        getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getProductivityTarget()
       ]);
-      setOperators(ops); setModels(mods); setOperations(opers); setMatrix(mtx); setActiveNews(news); setLogs(productionLogs);
+      
+      setOperators(ops); setModels(mods); setOperations(opers); 
+      setMatrix(mtx); setActiveNews(news); setDailyTarget(target);
+      setLogs(allProductionLogs); 
+
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // --- NUEVA FUNCIÓN: FORZAR ACTUALIZACIÓN ---
+  // --- LÓGICA DE REPORTES MENSUALES ---
+  const operatorStats = useMemo(() => {
+    if (!statsOperator || logs.length === 0) return null;
+
+    // 1. Filtrar por Operario Y por Mes Seleccionado
+    const opLogs = logs.filter(l => {
+      const logMonth = l.timestamp.substring(0, 7); // "YYYY-MM"
+      return l.operatorName === statsOperator && logMonth === statsMonth;
+    });
+    
+    // 2. Agrupar por día
+    const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
+    
+    opLogs.forEach(log => {
+      // Normalizamos fecha (YYYY-MM-DD)
+      const date = log.timestamp.includes('T') ? log.timestamp.split('T')[0] : new Date(log.timestamp).toISOString().split('T')[0];
+      
+      if (!groupedData[date]) {
+        groupedData[date] = { points: 0, hasUnrated: false };
+      }
+      groupedData[date].points += log.totalPoints;
+      
+      // Detectar día mixto (tarea sin puntos pero con cantidad > 0)
+      if (log.totalPoints === 0 && log.quantity > 0) {
+        groupedData[date].hasUnrated = true;
+      }
+    });
+
+    // 3. Convertimos a Array y ORDENAMOS ASCENDENTE (1, 2, 3...) igual que el Excel
+    const historyArray = Object.entries(groupedData)
+      .map(([date, data]) => ({ date, points: data.points, hasUnrated: data.hasUnrated }))
+      .sort((a, b) => a.date.localeCompare(b.date)); // Orden CRONOLÓGICO
+
+    // 4. Cálculos de Promedios
+    if (historyArray.length === 0) return { history: [], avgGeneral: 0, avgProductive: 0 };
+
+    const totalPointsAll = historyArray.reduce((acc, day) => acc + day.points, 0);
+    const avgGeneral = totalPointsAll / historyArray.length;
+
+    // Filtro Puro: Solo días > 0 puntos Y que NO sean mixtos
+    const pureDays = historyArray.filter(day => day.points > 0 && !day.hasUnrated);
+    const totalPointsPure = pureDays.reduce((acc, day) => acc + day.points, 0);
+    const avgProductive = pureDays.length > 0 ? totalPointsPure / pureDays.length : 0;
+
+    return {
+      history: historyArray,
+      avgGeneral: (avgGeneral / dailyTarget) * 100,
+      avgProductive: (avgProductive / dailyTarget) * 100
+    };
+
+  }, [logs, statsOperator, statsMonth, dailyTarget]);
+
+
   const handleForceUpdate = () => {
     if(window.confirm("¿Estás seguro?\n\nEsto recargará el sistema para bajar la última versión y limpiar memorias viejas.")) {
-      // 1. Borrar caché de datos (LocalStorage)
       localStorage.removeItem('cached_matrix');
       localStorage.removeItem('cached_matrix_time');
-      
-      // 2. Borrar caché de la App (Service Worker) si existe
       if ('caches' in window) {
-        caches.keys().then((names) => {
-          names.forEach((name) => {
-            caches.delete(name);
-          });
-        });
+        caches.keys().then((names) => { names.forEach((name) => { caches.delete(name); }); });
       }
-
-      // 3. Recargar página
       window.location.reload();
     }
   };
@@ -193,7 +242,7 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  const auditData = React.useMemo(() => {
+  const auditData = useMemo(() => {
     const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
     const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
     const groupedIncidents: Record<string, { sector: string, model: string, operation: string, count: number, operators: Set<string> }> = {};
@@ -210,6 +259,7 @@ export const AdminPanel: React.FC = () => {
 
   const fixMissingRule = (item: { sector: string, model: string, operation: string }) => {
     setNewRule({ sector: item.sector as Sector, model: item.model, operation: item.operation, pointsPerUnit: 0 });
+    setActiveTab('matrix');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -255,7 +305,6 @@ export const AdminPanel: React.FC = () => {
     if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
   };
 
-  // --- LOGICA DE BACKUP ---
   const handleFullBackup = async () => {
     setBackingUp(true);
     try {
@@ -278,7 +327,6 @@ export const AdminPanel: React.FC = () => {
     } catch (e) { console.error(e); alert("Error al generar el respaldo."); } finally { setBackingUp(false); }
   };
 
-  // --- LOGICA DE IMPORTACIÓN ---
   const handleBulkImport = async () => {
     if (!jsonImport || !window.confirm("¿Importar datos?")) return;
     setImporting(true);
@@ -296,7 +344,6 @@ export const AdminPanel: React.FC = () => {
     } catch (e) { alert("Error en JSON"); } finally { setImporting(false); }
   };
 
-  // FILTRADO MATRIZ
   const filteredMatrix = matrix.filter(rule => 
     rule.model.toLowerCase().includes(matrixSearch.toLowerCase()) || 
     rule.operation.toLowerCase().includes(matrixSearch.toLowerCase()) ||
@@ -312,13 +359,13 @@ export const AdminPanel: React.FC = () => {
             <div>
                 <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
                 <div className="flex flex-wrap gap-4 mt-6">
-                <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
-                <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz de Puntos</button>
-                <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
-                <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Datos & Backup</button>
+                  <button onClick={() => setActiveTab('stats')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${activeTab === 'stats' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}><BarChart3 className="w-4 h-4"/> Reportes</button>
+                  <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
+                  <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz</button>
+                  <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
+                  <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Datos</button>
                 </div>
             </div>
-            {/* BOTÓN DE ACTUALIZACIÓN FORZADA */}
             <button 
                 onClick={handleForceUpdate}
                 className="bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all shadow-sm"
@@ -330,16 +377,133 @@ export const AdminPanel: React.FC = () => {
         </div>
       </div>
 
+      {/* --- PESTAÑA: REPORTES Y ESTADÍSTICAS --- */}
+      {activeTab === 'stats' && (
+        <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><BarChart3 className="w-6 h-6 text-orange-600"/> Reporte Mensual de Productividad</h3>
+            
+            {/* SELECTOR DE OPERARIO Y MES */}
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Seleccionar Operario</label>
+                <select 
+                  className="w-full p-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-orange-500 font-bold text-slate-700"
+                  value={statsOperator}
+                  onChange={(e) => setStatsOperator(e.target.value)}
+                >
+                  <option value="">-- Elija un operario --</option>
+                  {operators.map(op => <option key={op} value={op}>{op}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mes de Análisis</label>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-full">
+                    <Calendar className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+                    <input 
+                      type="month" 
+                      className="w-full p-3 pl-10 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-orange-500 font-bold text-slate-700"
+                      value={statsMonth}
+                      onChange={(e) => setStatsMonth(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* DASHBOARD DEL OPERARIO */}
+            {statsOperator && operatorStats ? (
+              <div className="space-y-6">
+                
+                {/* 1. TARJETAS DE PROMEDIO */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   {/* REAL */}
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-center">
+                      <div className="text-xs uppercase font-bold text-slate-400 mb-1">Promedio Bruto (Real)</div>
+                      <div className="text-3xl font-black text-slate-600">{operatorStats.avgGeneral.toFixed(0)}%</div>
+                      <div className="text-xs text-slate-400 mt-1">Incluye días mixtos y sin puntos</div>
+                   </div>
+                   
+                   {/* PURO */}
+                   <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 ring-2 ring-blue-100 flex flex-col items-center justify-center text-center relative overflow-hidden">
+                      <div className="absolute top-0 right-0 bg-blue-600 text-white text-[9px] font-bold px-2 py-1 rounded-bl">PARA LIQUIDACIÓN</div>
+                      <div className="text-xs uppercase font-bold text-blue-600 mb-1 flex items-center gap-1"><Filter className="w-3 h-3"/> Promedio Puro</div>
+                      <div className="text-4xl font-black text-blue-700">{operatorStats.avgProductive.toFixed(0)}%</div>
+                      <div className="text-xs text-blue-500 mt-1 font-medium">Excluye días mixtos (Limpieza/Taller)</div>
+                   </div>
+                </div>
+
+                {/* 2. TABLA HISTÓRICA */}
+                <div className="overflow-hidden rounded-lg border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-xs">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Fecha</th>
+                        <th className="px-4 py-3 text-right">Puntos Logrados</th>
+                        <th className="px-4 py-3 text-right">Eficiencia</th>
+                        <th className="px-4 py-3 text-center">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {operatorStats.history.map((day, idx) => {
+                        const efficiency = (day.points / dailyTarget) * 100;
+                        const isMixed = day.hasUnrated; 
+                        const isZero = day.points === 0;
+                        const countsForPure = !isMixed && !isZero;
+
+                        return (
+                          <tr key={idx} className={`hover:bg-slate-50 transition-colors ${!countsForPure ? 'bg-slate-50/60' : ''}`}>
+                            <td className="px-4 py-3 font-mono text-slate-600">{new Date(day.date).toLocaleDateString()}</td>
+                            <td className="px-4 py-3 text-right font-bold text-slate-800">{day.points.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                efficiency >= 100 ? 'bg-green-100 text-green-700' :
+                                (efficiency >= 80 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700')
+                              }`}>
+                                {efficiency.toFixed(0)}%
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              {isMixed ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-200 text-slate-500 text-[10px] font-bold uppercase" title="Día mixto: No cuenta para promedio puro">
+                                  <AlertTriangle className="w-3 h-3"/> MIXTO
+                                </span>
+                              ) : (isZero ? (
+                                <span className="text-slate-300 text-[10px] uppercase font-bold">SIN PROD.</span>
+                              ) : (
+                                <span className="text-emerald-600 text-[10px] uppercase font-bold flex justify-center items-center gap-1"><Check className="w-3 h-3"/> PURO</span>
+                              ))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+            ) : (
+              <div className="text-center py-10 text-slate-400 italic bg-slate-50 rounded-lg border border-slate-100">
+                {statsOperator ? "No hay registros en este mes." : "Seleccione un operario y un mes."}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {activeTab === 'lists' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300">
           <ListManager title="Operarios" data={operators} onSave={handleSaveOperators} icon={Users} customDelete={handleSpecialDeleteOperator} />
           <ListManager title="Modelos" data={models} onSave={handleSaveModels} icon={Box} />
           <ListManager title="Operaciones" data={operations} onSave={handleSaveOperations} icon={Layers} />
         </div>
       )}
 
+      {/* ... Resto de pestañas Matrix, News, Import sin cambios lógicos ... */}
+      
       {activeTab === 'matrix' && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-in fade-in duration-300">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3">
                <div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div>
@@ -386,7 +550,6 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
           
-          {/* BUSCADOR MATRIZ */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center gap-3">
              <Search className="w-5 h-5 text-slate-400"/>
              <input 
@@ -439,7 +602,7 @@ export const AdminPanel: React.FC = () => {
       )}
 
       {activeTab === 'news' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-fit">
               <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Megaphone className="w-5 h-5 text-orange-600" /> Nuevo Comunicado</h3>
               <div className="space-y-4">
@@ -464,7 +627,7 @@ export const AdminPanel: React.FC = () => {
 
       {/* --- PESTAÑA: DATOS & BACKUP --- */}
       {activeTab === 'import' && (
-        <div className="space-y-8">
+        <div className="space-y-8 animate-in fade-in duration-300">
           
           {/* SECCIÓN 1: SEGURIDAD Y RESPALDO */}
           <div>
