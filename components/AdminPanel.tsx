@@ -8,7 +8,8 @@ import {
   deleteOperatorWithData, 
   restoreSystemFromBackup,
   recalculateAllHistory,
-  getProductivityTarget 
+  getProductivityTarget,
+  setOperatorPin // <--- IMPORTANTE: Asegúrate de tener esto en dataService
 } from '../services/dataService';
 import { db } from '../services/dataService'; 
 import { collection, getDocs, query, orderBy } from 'firebase/firestore'; 
@@ -17,13 +18,12 @@ import {
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
   FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search,
-  BarChart3, Filter, Target, Calendar 
+  BarChart3, Filter, Target, Calendar, Key 
 } from 'lucide-react';
 
-// --- UTILIDAD PARA FECHAS (NUEVO: Evita el problema de un día menos) ---
+// --- UTILIDAD PARA FECHAS ---
 const formatDateUTC = (dateString: string) => {
   if (!dateString) return '-';
-  // Si viene como "2026-01-12", lo partimos manualmente para evitar zonas horarias
   const parts = dateString.split('-'); 
   if (parts.length === 3) {
     const [year, month, day] = parts;
@@ -32,16 +32,17 @@ const formatDateUTC = (dateString: string) => {
   return dateString;
 };
 
-// --- COMPONENTE GESTOR DE LISTAS ---
+// --- COMPONENTE GESTOR DE LISTAS (CON SOPORTE DE PIN) ---
 interface ListManagerProps {
   title: string;
   data: string[];
   onSave: (d: string[]) => Promise<void>;
   icon: any;
   customDelete?: (item: string) => Promise<void>;
+  allowPin?: boolean; // Nueva prop para habilitar gestión de contraseñas
 }
 
-const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListManagerProps) => {
+const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }: ListManagerProps) => {
   const [newItem, setNewItem] = useState('');
   const [saving, setSaving] = useState(false);
   const [editingItem, setEditingItem] = useState<string | null>(null);
@@ -52,8 +53,35 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
     if (newItem.trim() && !data.includes(newItem)) {
       setSaving(true);
       await onSave([...data, newItem]);
+      
+      // Si estamos en la lista de operarios, ofrecemos crear el PIN inmediatamente
+      if (allowPin) {
+        const pin = prompt(`Ingrese un PIN de 4 dígitos para el operario "${newItem}":`, "0000");
+        if (pin) {
+          try {
+            await setOperatorPin(newItem, pin);
+            alert(`✅ Operario creado y PIN asignado: ${pin}`);
+          } catch (e) {
+            alert("Operario creado, pero hubo un error guardando el PIN.");
+          }
+        }
+      }
+
       setNewItem('');
       setSaving(false);
+    }
+  };
+
+  // Función para cambiar/resetear PIN
+  const handleSetPin = async (item: string) => {
+    const newPin = prompt(`Ingrese el NUEVO PIN de 4 dígitos para "${item}":`);
+    if (newPin && newPin.length >= 4) {
+      setSaving(true);
+      await setOperatorPin(item, newPin);
+      setSaving(false);
+      alert(`✅ PIN actualizado correctamente para ${item}`);
+    } else if (newPin) {
+      alert("⚠️ El PIN debe tener al menos 4 caracteres.");
     }
   };
 
@@ -109,6 +137,12 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete }: ListMana
               <>
                 <span className="text-slate-700 font-medium truncate flex-1">{item}</span>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* BOTÓN DE CLAVE - Solo aparece si allowPin es true */}
+                  {allowPin && (
+                    <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1.5 rounded hover:bg-amber-50 transition-colors" title="Asignar/Cambiar PIN">
+                      <Key className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <button onClick={() => startEdit(item)} className="text-slate-400 hover:text-blue-600 p-1.5 rounded hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
                   <button onClick={() => handleDelete(item)} className="text-slate-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
@@ -158,6 +192,7 @@ export const AdminPanel: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      // Cargamos todo el historial para reportes completos
       const allLogsQuery = query(collection(db, 'production_logs'), orderBy('timestamp', 'desc'));
       const allLogsSnapshot = await getDocs(allLogsQuery);
       const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ 
@@ -182,17 +217,15 @@ export const AdminPanel: React.FC = () => {
 
     // 1. Filtrar por Operario Y por Mes Seleccionado
     const opLogs = logs.filter(l => {
-      const logMonth = l.timestamp.substring(0, 7); // "YYYY-MM"
+      const logMonth = l.timestamp.substring(0, 7); 
       return l.operatorName === statsOperator && logMonth === statsMonth;
     });
     
-    // 2. Agrupar por día (CORREGIDO PARA USAR LOCAL TIME SI ES NECESARIO)
+    // 2. Agrupar por día
     const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
     
     opLogs.forEach(log => {
-      // Tomamos la fecha cruda "YYYY-MM-DD" que viene de la ISO (primeros 10 chars)
-      // OJO: Si tus operarios cargan a las 23:50, esto podría seguir siendo UTC.
-      // Asumimos que la fecha de carga del operario es correcta en string.
+      // Usamos la fecha cruda para evitar líos de zona horaria en el agrupamiento
       const date = log.timestamp.split('T')[0]; 
       
       if (!groupedData[date]) {
@@ -253,6 +286,7 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
+  // Auditoría
   const auditData = useMemo(() => {
     const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
     const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
@@ -465,7 +499,6 @@ export const AdminPanel: React.FC = () => {
 
                         return (
                           <tr key={idx} className={`hover:bg-slate-50 transition-colors ${!countsForPure ? 'bg-slate-50/60' : ''}`}>
-                            {/* CORRECCIÓN: Usamos formatDateUTC para que no reste 1 día */}
                             <td className="px-4 py-3 font-mono text-slate-600">{formatDateUTC(day.date)}</td>
                             <td className="px-4 py-3 text-right font-bold text-slate-800">{day.points.toLocaleString()}</td>
                             <td className="px-4 py-3 text-right">
@@ -506,14 +539,13 @@ export const AdminPanel: React.FC = () => {
 
       {activeTab === 'lists' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in duration-300">
-          <ListManager title="Operarios" data={operators} onSave={handleSaveOperators} icon={Users} customDelete={handleSpecialDeleteOperator} />
+          <ListManager title="Operarios" data={operators} onSave={handleSaveOperators} icon={Users} customDelete={handleSpecialDeleteOperator} allowPin={true} />
           <ListManager title="Modelos" data={models} onSave={handleSaveModels} icon={Box} />
           <ListManager title="Operaciones" data={operations} onSave={handleSaveOperations} icon={Layers} />
         </div>
       )}
 
-      {/* ... Resto de pestañas (Matrix, News, Import) se mantienen igual ... */}
-      
+      {/* --- PESTAÑA: MATRIZ DE PUNTOS --- */}
       {activeTab === 'matrix' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -613,6 +645,7 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
+      {/* --- PESTAÑA: NOTICIAS --- */}
       {activeTab === 'news' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-fit">
@@ -736,7 +769,7 @@ export const AdminPanel: React.FC = () => {
                     try {
                       const count = await recalculateAllHistory();
                       alert(`✅ Proceso terminado.\n\nSe actualizaron ${count} registros con los nuevos valores.`);
-                      await loadData(); // Recargamos para ver cambios
+                      await loadData(); 
                     } catch (e) {
                       alert("Error al recalcular.");
                     } finally {
