@@ -9,7 +9,7 @@ import {
   restoreSystemFromBackup,
   recalculateAllHistory,
   getProductivityTarget,
-  setOperatorPin // <--- IMPORTANTE: Asegúrate de tener esto en dataService
+  setOperatorPin // <--- IMPORTANTE
 } from '../services/dataService';
 import { db } from '../services/dataService'; 
 import { collection, getDocs, query, orderBy } from 'firebase/firestore'; 
@@ -18,13 +18,15 @@ import {
   Trash2, Plus, Users, Box, Layers, Calculator, AlertTriangle, Loader2, 
   Pencil, RefreshCw, X, Megaphone, Clock, Upload, Database, Check, 
   FileSearch, AlertOctagon, ArrowRight, Download, Shield, FileJson, Search,
-  BarChart3, Filter, Target, Calendar, Key 
+  BarChart3, Filter, Target, Calendar, Key, Keyboard // <--- Icono Keyboard Agregado
 } from 'lucide-react';
 
-// --- UTILIDAD PARA FECHAS (NUEVO: Evita el problema de un día menos) ---
+// IMPORTAMOS EL FORMULARIO (Asegúrate de que el archivo exista en la misma carpeta)
+import { OperatorForm } from './OperatorForm';
+
+// --- UTILIDAD PARA FECHAS ---
 const formatDateUTC = (dateString: string) => {
   if (!dateString) return '-';
-  // Si viene como "2026-01-12", lo partimos manualmente para evitar zonas horarias
   const parts = dateString.split('-'); 
   if (parts.length === 3) {
     const [year, month, day] = parts;
@@ -40,7 +42,7 @@ interface ListManagerProps {
   onSave: (d: string[]) => Promise<void>;
   icon: any;
   customDelete?: (item: string) => Promise<void>;
-  allowPin?: boolean; // Nueva propiedad para habilitar el botón de PIN
+  allowPin?: boolean; // Prop para activar gestión de claves
 }
 
 const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }: ListManagerProps) => {
@@ -55,14 +57,14 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
       setSaving(true);
       await onSave([...data, newItem]);
       
-      // Si es un operario, sugerimos crear PIN de una vez
+      // Si es operario, pedimos crear PIN de una vez
       if (allowPin) {
         const pin = prompt(`Ingrese un PIN de 4 dígitos para el nuevo operario "${newItem}":`, "1234");
         if (pin) {
              try {
                 await setOperatorPin(newItem, pin);
              } catch (e) {
-                console.error("No se pudo guardar el PIN automaticamente", e);
+                console.error("Error guardando PIN", e);
              }
         }
       }
@@ -72,7 +74,7 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
     }
   };
 
-  // Función para cambiar PIN manualmente
+  // Función para cambiar PIN
   const handleSetPin = async (item: string) => {
     const newPin = prompt(`Ingrese el NUEVO PIN de 4 dígitos para "${item}":`);
     if (newPin && newPin.length >= 4) {
@@ -137,9 +139,9 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
               <>
                 <span className="text-slate-700 font-medium truncate flex-1">{item}</span>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {/* BOTÓN DE PIN (SOLO SI ALLOWPIN ES TRUE) */}
+                  {/* BOTÓN DE CLAVE */}
                   {allowPin && (
-                    <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1.5 rounded hover:bg-amber-50 transition-colors" title="Gestionar PIN de acceso">
+                    <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1.5 rounded hover:bg-amber-50 transition-colors" title="Asignar PIN">
                         <Key className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -158,7 +160,8 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
 
 // --- MAIN COMPONENT ---
 export const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'lists' | 'matrix' | 'news' | 'import' | 'stats'>('stats');
+  // Agregamos 'manual' a las pestañas
+  const [activeTab, setActiveTab] = useState<'lists' | 'matrix' | 'news' | 'import' | 'stats' | 'manual'>('stats');
   const [loading, setLoading] = useState(true);
   
   const [operators, setOperators] = useState<string[]>([]);
@@ -183,16 +186,15 @@ export const AdminPanel: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
 
-  // Estados para REPORTES (CON MES)
+  // Estados para REPORTES
   const [statsOperator, setStatsOperator] = useState(''); 
-  const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7)); // "YYYY-MM"
+  const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      // CARGA COMPLETA PARA REPORTES
       const allLogsQuery = query(collection(db, 'production_logs'), orderBy('timestamp', 'desc'));
       const allLogsSnapshot = await getDocs(allLogsQuery);
       const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ 
@@ -215,17 +217,14 @@ export const AdminPanel: React.FC = () => {
   const operatorStats = useMemo(() => {
     if (!statsOperator || logs.length === 0) return null;
 
-    // 1. Filtrar por Operario Y por Mes Seleccionado
     const opLogs = logs.filter(l => {
-      const logMonth = l.timestamp.substring(0, 7); // "YYYY-MM"
+      const logMonth = l.timestamp.substring(0, 7); 
       return l.operatorName === statsOperator && logMonth === statsMonth;
     });
     
-    // 2. Agrupar por día
     const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
     
     opLogs.forEach(log => {
-      // Normalizamos fecha "YYYY-MM-DD"
       const date = log.timestamp.split('T')[0]; 
       
       if (!groupedData[date]) {
@@ -238,12 +237,10 @@ export const AdminPanel: React.FC = () => {
       }
     });
 
-    // 3. Convertimos a Array y ORDENAMOS ASCENDENTE
     const historyArray = Object.entries(groupedData)
       .map(([date, data]) => ({ date, points: data.points, hasUnrated: data.hasUnrated }))
       .sort((a, b) => a.date.localeCompare(b.date)); 
 
-    // 4. Cálculos de Promedios
     if (historyArray.length === 0) return { history: [], avgGeneral: 0, avgProductive: 0 };
 
     const totalPointsAll = historyArray.reduce((acc, day) => acc + day.points, 0);
@@ -404,6 +401,7 @@ export const AdminPanel: React.FC = () => {
                 <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
                 <div className="flex flex-wrap gap-4 mt-6">
                   <button onClick={() => setActiveTab('stats')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${activeTab === 'stats' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}><BarChart3 className="w-4 h-4"/> Reportes</button>
+                  <button onClick={() => setActiveTab('manual')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${activeTab === 'manual' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}><Keyboard className="w-4 h-4"/> Carga Manual</button>
                   <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
                   <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz</button>
                   <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
@@ -420,6 +418,13 @@ export const AdminPanel: React.FC = () => {
             </button>
         </div>
       </div>
+
+      {/* --- NUEVA PESTAÑA: CARGA MANUAL --- */}
+      {activeTab === 'manual' && (
+        <div className="animate-in fade-in zoom-in-95 duration-300">
+           <OperatorForm isManager={true} />
+        </div>
+      )}
 
       {/* --- PESTAÑA: REPORTES Y ESTADÍSTICAS --- */}
       {activeTab === 'stats' && (
@@ -498,6 +503,7 @@ export const AdminPanel: React.FC = () => {
 
                         return (
                           <tr key={idx} className={`hover:bg-slate-50 transition-colors ${!countsForPure ? 'bg-slate-50/60' : ''}`}>
+                            {/* CORRECCIÓN: Usamos formatDateUTC para que no reste 1 día */}
                             <td className="px-4 py-3 font-mono text-slate-600">{formatDateUTC(day.date)}</td>
                             <td className="px-4 py-3 text-right font-bold text-slate-800">{day.points.toLocaleString()}</td>
                             <td className="px-4 py-3 text-right">
