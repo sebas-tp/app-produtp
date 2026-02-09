@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
-  query, orderBy, setDoc, where, writeBatch, limit, getDoc 
+  query, orderBy, setDoc, where, writeBatch, limit, getDoc // <--- AGREGADO getDoc
 } from 'firebase/firestore';
 import { ProductionLog, PointRule, NewsItem, Sector } from '../types';
 import jsPDF from 'jspdf';
@@ -30,7 +30,7 @@ const NEWS_COL = 'news';
 const MATRIX_COL = 'points_matrix';
 const DEFAULT_TARGET = 24960;
 
-// 3. GESTIÓN DE LOGS
+// 3. GESTIÓN DE LOGS (OPTIMIZADO CON LIMIT 10)
 export const getLogs = async (startDate?: string, endDate?: string): Promise<ProductionLog[]> => {
   try {
     const logsRef = collection(db, LOGS_COL);
@@ -49,6 +49,7 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
         orderBy('timestamp', 'desc')
       );
     } else {
+      // Carga inicial limitada para operarios (Ahorro máximo)
       q = query(logsRef, orderBy('timestamp', 'desc'), limit(10));
     }
     
@@ -80,9 +81,12 @@ export const getLogs = async (startDate?: string, endDate?: string): Promise<Pro
   }
 };
 
+// --- CARGA POR DEMANDA (SOLUCIONA EL CALENDARIO VACÍO) ---
 export const getLogsByDate = async (dateString: string): Promise<ProductionLog[]> => {
   try {
     const logsRef = collection(db, LOGS_COL);
+    
+    // Rango exacto del día seleccionado (00:00 a 23:59)
     const start = `${dateString}T00:00:00`;
     const end = `${dateString}T23:59:59.999`;
 
@@ -94,6 +98,7 @@ export const getLogsByDate = async (dateString: string): Promise<ProductionLog[]
     );
     
     const snapshot = await getDocs(q);
+    
     return snapshot.docs.map(doc => {
       const data = doc.data() as any;
       return {
@@ -212,8 +217,9 @@ export const saveProductivityTarget = async (value: number) => {
   await setDoc(doc(db, CONFIG_COL, 'targets'), { dailyTarget: value }, { merge: true });
 };
 
-// --- GESTIÓN DE PINS ---
+// --- GESTIÓN DE PINs DE OPERARIOS (NUEVO) ---
 export const setOperatorPin = async (operatorName: string, pin: string) => {
+  // Guardamos el PIN en un documento separado 'auth_pins' en la colección de config
   await setDoc(doc(db, CONFIG_COL, 'auth_pins'), { [operatorName]: pin }, { merge: true });
 };
 
@@ -224,52 +230,77 @@ export const verifyOperatorPin = async (operatorName: string, inputPin: string):
     if (docSnap.exists()) {
       const data = docSnap.data();
       const correctPin = data[operatorName];
+      // Si no tiene PIN configurado, dejamos pasar (o podrías exigir '0000')
       if (!correctPin) return true; 
       return correctPin === inputPin;
     }
-    return true; 
+    return true; // Si no existe el documento de PINs, paso libre
   } catch (e) {
+    console.error("Error verificando PIN", e);
     return false;
   }
 };
 
-// 5. MATRIZ DE PUNTOS
+// 5. MATRIZ DE PUNTOS (CON CACHÉ INTELIGENTE)
 export const getPointsMatrix = async (forceRefresh = false): Promise<PointRule[]> => {
   try {
     if (!forceRefresh) {
       const cachedData = localStorage.getItem('cached_matrix');
       const cachedTime = localStorage.getItem('cached_matrix_time');
+      
       if (cachedData && cachedTime) {
         const now = new Date().getTime();
-        if (now - parseInt(cachedTime) < 24 * 60 * 60 * 1000) return JSON.parse(cachedData);
+        const cacheAge = now - parseInt(cachedTime);
+        const oneDay = 24 * 60 * 60 * 1000; 
+        
+        if (cacheAge < oneDay) {
+            return JSON.parse(cachedData);
+        }
       }
     }
+
     const snapshot = await getDocs(collection(db, MATRIX_COL));
     if (snapshot.empty) return [];
+    
     const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PointRule));
+
     try {
       localStorage.setItem('cached_matrix', JSON.stringify(data));
       localStorage.setItem('cached_matrix_time', new Date().getTime().toString());
-    } catch (e) {}
+    } catch (e) {
+      console.warn("No se pudo guardar en caché", e);
+    }
+
     return data;
-  } catch (error) { return []; }
+  } catch (error) { 
+      console.error("Error matrix:", error); 
+      return []; 
+  }
 };
+
+// --- LIMPIEZA DE CACHÉ AL GUARDAR ---
 
 export const addPointRule = async (rule: PointRule) => {
   const { id, ...data } = rule;
   await addDoc(collection(db, MATRIX_COL), data);
+  // Borramos caché para obligar a descargar la lista nueva
   localStorage.removeItem('cached_matrix');
+  localStorage.removeItem('cached_matrix_time');
 };
 
 export const updatePointRule = async (rule: PointRule) => {
   const { id, ...data } = rule;
   await updateDoc(doc(db, MATRIX_COL, id!), data);
+  // Borramos caché
   localStorage.removeItem('cached_matrix');
+  localStorage.removeItem('cached_matrix_time');
 };
 
 export const deletePointRule = async (id: string) => {
   await deleteDoc(doc(db, MATRIX_COL, id));
+  // Borramos caché
   localStorage.removeItem('cached_matrix');
+  localStorage.removeItem('cached_matrix_time');
 };
 
 export const getPointRuleSync = (matrix: PointRule[], sector: Sector | string, model: string, operation: string) => {
@@ -336,7 +367,7 @@ export const downloadPDF = (logs: ProductionLog[], title: string, filename: stri
   doc.save(`${filename}.pdf`);
 };
 
-// 8. RESTAURACIÓN Y FIXES
+// 8. RESTAURACIÓN
 export const restoreSystemFromBackup = async (backupData: any) => {
   try {
     const batch = writeBatch(db);
@@ -345,57 +376,169 @@ export const restoreSystemFromBackup = async (backupData: any) => {
       if (backupData.config.models) await saveModels(backupData.config.models);
       if (backupData.config.operations) await saveOperations(backupData.config.operations);
     }
-    if (backupData.matrix) {
+    if (backupData.matrix && Array.isArray(backupData.matrix)) {
       for (const rule of backupData.matrix) {
         const ref = rule.id ? doc(db, 'points_matrix', rule.id) : doc(collection(db, 'points_matrix'));
-        const { id, ...data } = rule; await setDoc(ref, data, { merge: true });
+        const { id, ...data } = rule; 
+        await setDoc(ref, data, { merge: true });
       }
     }
-    if (backupData.logs) {
+    if (backupData.news && Array.isArray(backupData.news)) {
+      for (const item of backupData.news) {
+        const ref = doc(db, 'news', item.id);
+        const { id, ...data } = item; 
+        await setDoc(ref, data, { merge: true });
+      }
+    }
+    if (backupData.logs && Array.isArray(backupData.logs)) {
       const chunkSize = 50;
       for (let i = 0; i < backupData.logs.length; i += chunkSize) {
         const chunk = backupData.logs.slice(i, i + chunkSize);
         await Promise.all(chunk.map(async (log: any) => {
           const ref = log.id ? doc(db, 'production_logs', log.id) : doc(collection(db, 'production_logs'));
           const { id, ...data } = log;
-          const cleanData = { ...data, operator: data.operatorName || data.operator, points: data.totalPoints || data.points };
+          const cleanData = {
+            ...data,
+            operator: data.operatorName || data.operator,
+            points: data.totalPoints || data.points
+          };
           await setDoc(ref, cleanData, { merge: true });
         }));
       }
     }
     return true;
-  } catch (error) { return false; }
+  } catch (error) {
+    console.error("Error crítico en restauración:", error);
+    return false;
+  }
 };
 
-// Función que Vercel reclamaba (la agregué para que no falle el build)
+// =======================================================
+// 9. SCRIPT DE CORRECCIÓN DE DATOS
+// =======================================================
 export const fixDatabaseData = async () => {
-  console.log("No-op function for compatibility");
+  try {
+    console.log("🚀 Iniciando limpieza Y NORMALIZACIÓN de mayúsculas...");
+    const snapshot = await getDocs(collection(db, MATRIX_COL));
+    const batch = writeBatch(db);
+    let count = 0;
+
+    snapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data() as PointRule;
+      let currentOp = data.operation.trim();
+      let currentModel = data.model;
+      let needsUpdate = false;
+
+      // 1. DETECCIÓN DE MEDIDAS (2m, 4m OR, etc) -> Mover al Modelo
+      const isSimpleMeasure = /^\d+(\.\d+)?m$/i.test(currentOp);
+      const isComplexMeasure = /^\d+(\.\d+)?m\s+.*$/i.test(currentOp); // Detecta "1m OR"
+
+      if (isSimpleMeasure || isComplexMeasure) {
+        currentModel = `${data.model} ${currentOp}`; // Movemos medida al modelo
+        currentOp = data.sector.toLowerCase(); // Ponemos el sector como operación (EN MINÚSCULA)
+        needsUpdate = true;
+      }
+
+      // 2. CORRECCIÓN DE MAYÚSCULAS
+      const badCapitalization = ["Costura", "Armado", "Corte", "Embalaje", "Limpieza", "Empaque"];
+      
+      if (badCapitalization.includes(currentOp)) {
+        currentOp = currentOp.toLowerCase(); // "Costura" -> "costura"
+        needsUpdate = true;
+      }
+
+      // 3. Aplicar cambios si es necesario
+      if (needsUpdate) {
+        const docRef = doc(db, MATRIX_COL, docSnap.id);
+        batch.update(docRef, {
+          model: currentModel,
+          operation: currentOp
+        });
+        count++;
+      }
+    });
+
+    if (count > 0) {
+      await batch.commit();
+      console.log(`✅ ¡Éxito! Se corrigieron ${count} registros.`);
+      alert(`✅ Se arreglaron ${count} registros (Mayúsculas y Medidas).`);
+    } else {
+      console.log("👍 Todo limpio.");
+      alert("👍 La base de datos ya está limpia y en minúsculas.");
+    }
+    
+    // Limpiamos caché
+    localStorage.removeItem('cached_matrix');
+    localStorage.removeItem('cached_matrix_time');
+
+  } catch (error) {
+    console.error("Error script:", error);
+    alert("Error al corregir datos.");
+  }
 };
 
+// --- NUEVA FUNCIÓN: RECÁLCULO MASIVO (MANTENIMIENTO) ---
 export const recalculateAllHistory = async () => {
   try {
+    console.log("🔄 Iniciando recálculo masivo...");
+    
+    // 1. Traemos TODOS los logs (sin el limite de 10)
+    // Hacemos una query explícita para evitar el limit(10) de la función getLogs por defecto
     const allLogsQuery = query(collection(db, LOGS_COL), orderBy('timestamp', 'desc'));
     const snapshot = await getDocs(allLogsQuery);
     const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionLog));
-    const matrix = await getPointsMatrix(true);
+
+    // 2. Traemos la Matriz Actualizada
+    const matrix = await getPointsMatrix(true); // true = Forzar descarga fresca
+    
     const batch = writeBatch(db);
     let updateCount = 0;
     let batchCount = 0;
 
+    // 3. Recorremos cada registro
     for (const log of logs) {
-      const rule = matrix.find(r => r.sector === log.sector && r.model === log.model && r.operation === log.operation);
+      // Buscamos si existe una regla para este Log
+      const rule = matrix.find(r => 
+        r.sector === log.sector && 
+        r.model === log.model && 
+        r.operation === log.operation
+      );
+
       if (rule) {
+        // Calculamos cuánto DEBERÍA valer
         const correctPoints = rule.pointsPerUnit * log.quantity;
+        
+        // Comparamos con flotantes (márgen de error 0.01)
+        // También verificamos si vale 0 y ahora debería tener valor
         if (Math.abs(correctPoints - log.totalPoints) > 0.01) {
           const ref = doc(db, LOGS_COL, log.id!);
-          batch.update(ref, { totalPoints: correctPoints, points: correctPoints });
+          
+          // Preparamos la actualización
+          batch.update(ref, { 
+            totalPoints: correctPoints,
+            points: correctPoints 
+          });
+          
           updateCount++;
           batchCount++;
         }
       }
-      if (batchCount >= 400) { await batch.commit(); batchCount = 0; }
+      
+      // Firebase solo permite 500 escrituras por lote
+      if (batchCount >= 400) {
+        await batch.commit();
+        batchCount = 0; 
+      }
     }
-    if (batchCount > 0) { await batch.commit(); }
+
+    // 4. Guardamos los pendientes finales
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+
     return updateCount; 
-  } catch (error) { throw error; }
+  } catch (error) {
+    console.error("Error en recálculo:", error);
+    throw error;
+  }
 };
