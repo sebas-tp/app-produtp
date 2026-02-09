@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, 
-  query, orderBy, setDoc, where, writeBatch, limit 
+  query, orderBy, setDoc, where, writeBatch, limit, getDoc // <--- Agregado getDoc
 } from 'firebase/firestore';
 import { ProductionLog, PointRule, NewsItem, Sector } from '../types';
 import jsPDF from 'jspdf';
@@ -215,6 +215,36 @@ export const getProductivityTarget = async (): Promise<number> => {
 
 export const saveProductivityTarget = async (value: number) => {
   await setDoc(doc(db, CONFIG_COL, 'targets'), { dailyTarget: value }, { merge: true });
+};
+
+// --- GESTIÓN DE SEGURIDAD Y PINS (NUEVO) ---
+export const setOperatorPin = async (operatorName: string, pin: string) => {
+  // Guardamos los PINs en un documento separado 'auth_pins' para no mezclarlo con la lista pública
+  await setDoc(doc(db, CONFIG_COL, 'auth_pins'), { [operatorName]: pin }, { merge: true });
+};
+
+export const verifyOperatorPin = async (operatorName: string, inputPin: string): Promise<boolean> => {
+  try {
+    const docRef = doc(db, CONFIG_COL, 'auth_pins');
+    const docSnap = await getDoc(docRef);
+    
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      const correctPin = data[operatorName];
+      
+      // Si el operario NO tiene PIN configurado, permitimos el acceso (modo transición)
+      // Esto es vital para el lanzamiento: si no configuras PIN a alguien, igual puede trabajar.
+      if (!correctPin) return true; 
+      
+      return correctPin === inputPin;
+    }
+    
+    // Si no existe el documento de PINs, paso libre
+    return true; 
+  } catch (e) {
+    console.error("Error verificando PIN", e);
+    return false; // Ante duda, bloquear
+  }
 };
 
 // 5. MATRIZ DE PUNTOS (CON CACHÉ INTELIGENTE)
