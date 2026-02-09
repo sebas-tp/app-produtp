@@ -6,7 +6,7 @@ import {
   updateProductionLog, deleteProductionLog, 
   getProductivityTarget, getActiveNews, NewsItem,
   getLogsByDate,
-  verifyOperatorPin // <--- IMPORTANTE: La función de seguridad
+  verifyOperatorPin
 } from '../services/dataService';
 import { 
   Save, AlertCircle, CheckCircle, Clock, FileDown, History, Loader2, 
@@ -14,10 +14,8 @@ import {
   MessageSquare, TrendingUp, Search, ChevronDown, Filter, Lock, LogOut, UserCheck 
 } from 'lucide-react';
 
-// --- UTILIDAD PARA FECHAS (SOLUCIÓN DEFINITIVA A ZONA HORARIA) ---
 const formatDate = (dateString: string) => {
   if (!dateString) return '-';
-  // Cortamos el string "YYYY-MM-DD" manualmente para evitar que el navegador reste horas
   const parts = dateString.split('-'); 
   if (parts.length === 3) {
     const [year, month, day] = parts;
@@ -103,19 +101,13 @@ export const OperatorForm: React.FC = () => {
   const progressPercent = dailyTarget > 0 ? (totalPointsView / dailyTarget) * 100 : 0;
   const isGoalReached = progressPercent >= 100;
 
-  // LÓGICA DE PROMEDIOS (REAL vs PURO)
   const stats = React.useMemo(() => {
     if (operatorHistory.length === 0) return { avgGeneral: 0, avgProductive: 0 };
-    
-    // Promedio General (Bruto)
     const totalAll = operatorHistory.reduce((a, b) => a + b.points, 0);
     const avgGeneral = totalAll / operatorHistory.length;
-    
-    // Promedio Puro (Filtra días mixtos/sin puntos)
     const pureDays = operatorHistory.filter(d => d.points > 0 && !d.hasUnrated);
     const totalPure = pureDays.reduce((a, b) => a + b.points, 0);
     const avgProductive = pureDays.length > 0 ? totalPure / pureDays.length : 0;
-
     return { 
       avgGeneral: (avgGeneral / dailyTarget) * 100, 
       avgProductive: (avgProductive / dailyTarget) * 100 
@@ -131,7 +123,6 @@ export const OperatorForm: React.FC = () => {
         ]);
         setOperatorList(ops); setModelList(mods); setOperationList(opers); setMatrix(mtx); setDailyTarget(target); setNews(activeNews);
         
-        // RECUPERAR SESIÓN GUARDADA
         const savedOp = localStorage.getItem('topsafe_session_user');
         if (savedOp && ops.includes(savedOp)) {
           setLockedOperator(savedOp);
@@ -156,7 +147,6 @@ export const OperatorForm: React.FC = () => {
       const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
       
       const opLogs = uniqueLogs.filter(l => l.operatorName === formData.operatorName);
-      
       opLogs.forEach(log => {
         const date = log.timestamp.split('T')[0];
         if (!groupedData[date]) groupedData[date] = { points: 0, hasUnrated: false };
@@ -167,7 +157,7 @@ export const OperatorForm: React.FC = () => {
       const historyArray = Object.entries(groupedData)
         .map(([date, d]) => ({ date, ...d }))
         .sort((a, b) => b.date.localeCompare(a.date))
-        .slice(0, 30); // 30 días
+        .slice(0, 30);
 
       setOperatorHistory(historyArray);
     }
@@ -180,7 +170,6 @@ export const OperatorForm: React.FC = () => {
     setPredictedPoints(val * (parseInt(formData.quantity) || 0));
   }, [formData.sector, formData.model, formData.operation, formData.quantity, matrix]);
 
-  // --- MANEJO DE PIN Y SESIÓN ---
   const handleOperatorSelect = (name: string) => {
     setPendingOperator(name);
     setPinInput('');
@@ -190,13 +179,11 @@ export const OperatorForm: React.FC = () => {
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validamos el PIN contra la base de datos
     const isValid = await verifyOperatorPin(pendingOperator, pinInput);
-    
     if (isValid) {
       setLockedOperator(pendingOperator);
       setFormData(prev => ({ ...prev, operatorName: pendingOperator }));
-      localStorage.setItem('topsafe_session_user', pendingOperator); // Guardamos sesión
+      localStorage.setItem('topsafe_session_user', pendingOperator); 
       setShowPinModal(false);
     } else {
       setPinError(true);
@@ -214,18 +201,43 @@ export const OperatorForm: React.FC = () => {
     }
   };
 
-  // --- HANDLERS COMUNES ---
+  // --- ARREGLO DEL ERROR DE TYPESCRIPT AQUÍ ---
+  const handleEditClick = (log: ProductionLog) => {
+    setEditingId(log.id!);
+    const logDate = log.timestamp.split('T')[0];
+    setSelectedDate(logDate);
+    
+    // Mapeo explícito para evitar error de tipos (Required vs Optional)
+    setFormData({
+      operatorName: log.operatorName,
+      sector: log.sector as Sector,
+      model: log.model,
+      operation: log.operation,
+      quantity: log.quantity.toString(),
+      startTime: log.startTime || '08:00',
+      endTime: log.endTime || '17:00',
+      orderNumber: log.orderNumber || '', // Si es undefined, usa ''
+      comments: log.comments || ''        // Si es undefined, usa ''
+    });
+    
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeleteClick = async (id: string) => { if(confirm("¿Borrar?")) { await deleteProductionLog(id); await loadLogsByDate(); }};
+  const handleCancelEdit = () => { setEditingId(null); setFormData(prev => ({...prev, quantity: '', model: '', operation: '', comments: ''})); };
+  const handleChange = (e: any) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  const handleDownload = () => downloadCSV(currentViewLogs, `Prod_${formData.operatorName}_${selectedDate}`);
+
+  // SUBMIT
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.operatorName || !formData.model || !formData.operation || !formData.quantity) { alert("Completar campos"); return; }
     
     setIsSaving(true);
     try {
-      // Crear fecha combinando el día seleccionado y la hora actual
       const entryDate = new Date(selectedDate);
       const now = new Date();
       entryDate.setHours(now.getHours(), now.getMinutes());
-      // Ajuste local para evitar UTC
       const localISO = new Date(entryDate.getTime() - (entryDate.getTimezoneOffset() * 60000)).toISOString();
 
       const logData = { timestamp: localISO, ...formData, quantity: parseInt(formData.quantity), totalPoints: predictedPoints };
@@ -237,12 +249,6 @@ export const OperatorForm: React.FC = () => {
       setTimeout(() => setStatus('idle'), 3000);
     } catch { setStatus('error'); } finally { setIsSaving(false); }
   };
-
-  const handleEditClick = (log: ProductionLog) => { setEditingId(log.id!); setSelectedDate(log.timestamp.split('T')[0]); setFormData({...log, sector: log.sector as Sector, quantity: log.quantity.toString()}); window.scrollTo(0,0); };
-  const handleDeleteClick = async (id: string) => { if(confirm("¿Borrar?")) { await deleteProductionLog(id); await loadLogsByDate(); }};
-  const handleCancelEdit = () => { setEditingId(null); setFormData(prev => ({...prev, quantity: '', model: '', operation: '', comments: ''})); };
-  const handleChange = (e: any) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  const handleDownload = () => downloadCSV(currentViewLogs, `Prod_${formData.operatorName}_${selectedDate}`);
 
   if (isLoading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin w-8 h-8 text-orange-500"/></div>;
 
@@ -256,19 +262,8 @@ export const OperatorForm: React.FC = () => {
             <div className="flex justify-center mb-4"><div className="bg-blue-100 p-3 rounded-full"><Lock className="w-8 h-8 text-blue-600"/></div></div>
             <h3 className="text-xl font-bold text-center text-slate-800 mb-1">Hola, {pendingOperator}</h3>
             <p className="text-sm text-slate-500 text-center mb-6">Ingresa tu PIN de 4 dígitos para continuar.</p>
-            
             <form onSubmit={handlePinSubmit}>
-              <input 
-                type="password" 
-                inputMode="numeric" 
-                pattern="[0-9]*" 
-                maxLength={4} 
-                className="w-full text-center text-3xl font-bold tracking-[0.5em] p-3 border-2 border-slate-300 rounded-lg mb-4 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all text-slate-800" 
-                autoFocus 
-                value={pinInput} 
-                onChange={e => { setPinInput(e.target.value); setPinError(false); }} 
-                placeholder="••••"
-              />
+              <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={4} className="w-full text-center text-3xl font-bold tracking-[0.5em] p-3 border-2 border-slate-300 rounded-lg mb-4 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition-all text-slate-800" autoFocus value={pinInput} onChange={e => { setPinInput(e.target.value); setPinError(false); }} placeholder="••••"/>
               {pinError && <p className="text-red-500 text-xs text-center mb-4 font-bold bg-red-50 p-2 rounded animate-pulse">❌ PIN Incorrecto. Intenta de nuevo.</p>}
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowPinModal(false)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-lg font-bold text-slate-600 transition-colors">Cancelar</button>
@@ -300,8 +295,6 @@ export const OperatorForm: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
-            {/* SELECTOR CON IDENTIDAD */}
             {lockedOperator ? (
               <div className="w-full border-2 border-green-500 bg-green-50 p-3 rounded-lg flex justify-between items-center shadow-sm">
                 <div className="flex items-center gap-3">
@@ -313,7 +306,6 @@ export const OperatorForm: React.FC = () => {
             ) : (
               <SearchableSelect label="Operario" options={operatorList} value={formData.operatorName} onChange={handleOperatorSelect} placeholder="Buscar tu nombre..." disabled={!!editingId} />
             )}
-            
             <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Orden / Lote</label><input type="text" name="orderNumber" value={formData.orderNumber} onChange={handleChange} className="w-full p-3 border rounded-lg font-bold outline-none focus:ring-2 focus:ring-amber-500" placeholder="Ej: 10500"/></div>
           </div>
 
