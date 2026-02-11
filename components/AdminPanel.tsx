@@ -9,7 +9,7 @@ import {
   restoreSystemFromBackup,
   recalculateAllHistory,
   getProductivityTarget,
-  setOperatorPin // <--- IMPORTANTE
+  setOperatorPin // <--- IMPORTANTE: Asegúrate de tener esto en dataService
 } from '../services/dataService';
 import { db } from '../services/dataService'; 
 import { collection, getDocs, query, orderBy } from 'firebase/firestore'; 
@@ -401,7 +401,7 @@ export const AdminPanel: React.FC = () => {
                 <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
                 <div className="flex flex-wrap gap-4 mt-6">
                   <button onClick={() => setActiveTab('stats')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${activeTab === 'stats' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}><BarChart3 className="w-4 h-4"/> Reportes</button>
-                  <button onClick={() => setActiveTab('manual')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${activeTab === 'manual' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}><Keyboard className="w-4 h-4"/> Carga Manual</button>
+                  <button onClick={() => setActiveTab('manual')} className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${activeTab === 'manual' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}><Keyboard className="w-4 h-4"/> Carga Manual</button>
                   <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
                   <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz</button>
                   <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
