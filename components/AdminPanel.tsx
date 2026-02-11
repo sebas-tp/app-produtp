@@ -302,7 +302,7 @@ export const AdminPanel: React.FC = () => {
   return (
     <div className="space-y-6 pb-20">
       <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md border-l-4 border-orange-600">
-        <div className="flex justify-between items-start"><h2 className="text-2xl font-bold">Configuración TopSafe</h2><button onClick={handleForceUpdate} className="bg-slate-700 px-3 py-1 rounded text-xs"><RefreshCw className="w-4 h-4"/> ACtualizar Sistema </button></div>
+        <div className="flex justify-between items-start"><h2 className="text-2xl font-bold">Configuración TopSafe</h2><button onClick={handleForceUpdate} className="bg-slate-700 px-3 py-1 rounded text-xs" title="Usar si no se ven los cambios recientes"><RefreshCw className="w-4 h-4"/>ACTUALIZAR SISTEMA</button></div>
         <div className="flex flex-wrap gap-4 mt-6">
             {['stats', 'manual', 'lists', 'matrix', 'news', 'import'].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize flex items-center gap-2 ${activeTab === tab ? (tab==='manual'?'bg-indigo-600':'bg-orange-600') : 'bg-slate-700'}`}>
