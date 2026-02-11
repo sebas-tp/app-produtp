@@ -21,7 +21,7 @@ import {
   BarChart3, Filter, Target, Calendar, Key, Keyboard 
 } from 'lucide-react';
 
-// IMPORTAMOS EL FORMULARIO (Asegúrate de que el archivo exista en la misma carpeta)
+// IMPORTAMOS EL FORMULARIO
 import { OperatorForm } from './OperatorForm';
 
 // --- UTILIDAD PARA FECHAS ---
@@ -42,7 +42,7 @@ interface ListManagerProps {
   onSave: (d: string[]) => Promise<void>;
   icon: any;
   customDelete?: (item: string) => Promise<void>;
-  allowPin?: boolean; // Prop para activar gestión de claves
+  allowPin?: boolean; 
 }
 
 const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }: ListManagerProps) => {
@@ -56,55 +56,39 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
     if (newItem.trim() && !data.includes(newItem)) {
       setSaving(true);
       await onSave([...data, newItem]);
-      
-      // Si es operario, pedimos crear PIN de una vez
       if (allowPin) {
-        const pin = prompt(`Ingrese un PIN de 4 dígitos para el nuevo operario "${newItem}":`, "1234");
-        if (pin) {
-             try {
-                await setOperatorPin(newItem, pin);
-             } catch (e) {
-                console.error("Error guardando PIN", e);
-             }
-        }
+        const pin = prompt(`Ingrese un PIN de 4 dígitos para "${newItem}":`, "1234");
+        if (pin) try { await setOperatorPin(newItem, pin); } catch (e) { console.error(e); }
       }
-
       setNewItem('');
       setSaving(false);
     }
   };
 
-  // Función para cambiar PIN
   const handleSetPin = async (item: string) => {
     const newPin = prompt(`Ingrese el NUEVO PIN de 4 dígitos para "${item}":`);
     if (newPin && newPin.length >= 4) {
       setSaving(true);
       await setOperatorPin(item, newPin);
       setSaving(false);
-      alert(`✅ PIN actualizado correctamente para ${item}`);
-    } else if (newPin) {
-      alert("⚠️ El PIN debe tener al menos 4 caracteres.");
-    }
+      alert(`✅ PIN actualizado para ${item}`);
+    } else if (newPin) { alert("El PIN debe tener al menos 4 caracteres."); }
   };
 
   const handleDelete = async (item: string) => {
     if (customDelete) { await customDelete(item); return; }
-    if (window.confirm(`¿Está seguro de eliminar "${item}"?`)) {
+    if (window.confirm(`¿Eliminar "${item}"?`)) {
       setSaving(true);
-      const updatedList = data.filter(i => i !== item);
-      await onSave(updatedList);
+      await onSave(data.filter(i => i !== item));
       setSaving(false);
     }
   };
-
-  const startEdit = (item: string) => { setEditingItem(item); setEditValue(item); };
 
   const saveEdit = async () => {
     if (!editValue.trim() || editValue === editingItem) { setEditingItem(null); return; }
     if (data.includes(editValue)) { alert("Ya existe."); return; }
     setSaving(true);
-    const updatedList = data.map(item => item === editingItem ? editValue : item);
-    await onSave(updatedList);
+    await onSave(data.map(item => item === editingItem ? editValue : item));
     setEditingItem(null); setEditValue(''); setSaving(false);
   };
 
@@ -113,46 +97,26 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-full relative flex flex-col">
       {saving && <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center"><Loader2 className="animate-spin text-orange-600"/></div>}
-      <div className="flex items-center gap-2 mb-4 text-slate-800">
-          <Icon className="w-5 h-5 text-orange-600" />
-          <h3 className="font-bold">{title}</h3>
-          <span className="ml-auto text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">{data.length}</span>
-      </div>
-      <div className="flex gap-2 mb-4">
-        <input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm outline-none text-slate-900 focus:ring-2 focus:ring-orange-200" />
-        <button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 disabled:opacity-50"><Plus className="w-5 h-5" /></button>
-      </div>
-      <div className="relative mb-2">
-        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>
-        <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 outline-none focus:border-blue-300 transition-colors"/>
-      </div>
+      <div className="flex items-center gap-2 mb-4 text-slate-800"><Icon className="w-5 h-5 text-orange-600" /><h3 className="font-bold">{title}</h3><span className="ml-auto text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">{data.length}</span></div>
+      <div className="flex gap-2 mb-4"><input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm"/><button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg"><Plus className="w-5 h-5"/></button></div>
+      <div className="relative mb-2"><Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/><input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg"/></div>
       <div className="space-y-2 max-h-80 overflow-y-auto pr-1 custom-scrollbar flex-1">
         {filteredData.map((item) => (
-          <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group transition-colors ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
+          <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
             {editingItem === item ? (
-              <div className="flex w-full items-center gap-2">
-                <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="flex-1 bg-white border border-blue-300 rounded px-2 py-1 text-slate-900 outline-none text-xs font-bold" autoFocus />
-                <button onClick={saveEdit} className="text-green-600 hover:bg-green-100 p-1 rounded"><Check className="w-4 h-4"/></button>
-                <button onClick={() => setEditingItem(null)} className="text-red-500 hover:bg-red-100 p-1 rounded"><X className="w-4 h-4"/></button>
-              </div>
+              <div className="flex w-full items-center gap-2"><input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="flex-1 bg-white border rounded px-2 py-1" autoFocus/><button onClick={saveEdit}><Check className="w-4 h-4 text-green-600"/></button><button onClick={() => setEditingItem(null)}><X className="w-4 h-4 text-red-500"/></button></div>
             ) : (
               <>
                 <span className="text-slate-700 font-medium truncate flex-1">{item}</span>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {/* BOTÓN DE CLAVE */}
-                  {allowPin && (
-                    <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1.5 rounded hover:bg-amber-50 transition-colors" title="Asignar PIN">
-                        <Key className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button onClick={() => startEdit(item)} className="text-slate-400 hover:text-blue-600 p-1.5 rounded hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(item)} className="text-slate-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  {allowPin && <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1"><Key className="w-3.5 h-3.5"/></button>}
+                  <button onClick={() => { setEditingItem(item); setEditValue(item); }} className="text-slate-400 hover:text-blue-600 p-1"><Pencil className="w-3.5 h-3.5"/></button>
+                  <button onClick={() => handleDelete(item)} className="text-slate-400 hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5"/></button>
                 </div>
               </>
             )}
           </div>
         ))}
-        {filteredData.length === 0 && <p className="text-slate-400 text-xs italic text-center py-4">No se encontraron resultados</p>}
       </div>
     </div>
   );
@@ -171,21 +135,14 @@ export const AdminPanel: React.FC = () => {
   const [logs, setLogs] = useState<ProductionLog[]>([]);
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
 
-  // Estados para Edición
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
   const [matrixSearch, setMatrixSearch] = useState(''); 
-
-  // Estados para Noticias
   const [activeNews, setActiveNews] = useState<NewsItem[]>([]);
   const [newsForm, setNewsForm] = useState({ title: '', content: '', duration: '24' });
-
-  // Estados para Import/Export
   const [jsonImport, setJsonImport] = useState('');
   const [importing, setImporting] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
-
-  // Estados para REPORTES
   const [statsOperator, setStatsOperator] = useState(''); 
   const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
@@ -196,112 +153,58 @@ export const AdminPanel: React.FC = () => {
     try {
       const allLogsQuery = query(collection(db, 'production_logs'), orderBy('timestamp', 'desc'));
       const allLogsSnapshot = await getDocs(allLogsQuery);
-      const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      } as ProductionLog));
-
-      const [ops, mods, opers, mtx, news, target] = await Promise.all([
-        getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getProductivityTarget()
-      ]);
-      
-      setOperators(ops); setModels(mods); setOperations(opers); 
-      setMatrix(mtx); setActiveNews(news); setDailyTarget(target);
-      setLogs(allProductionLogs); 
-
+      const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionLog));
+      const [ops, mods, opers, mtx, news, target] = await Promise.all([getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getProductivityTarget()]);
+      setOperators(ops); setModels(mods); setOperations(opers); setMatrix(mtx); setActiveNews(news); setDailyTarget(target); setLogs(allProductionLogs); 
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
-  // --- LÓGICA DE REPORTES MENSUALES ---
   const operatorStats = useMemo(() => {
     if (!statsOperator || logs.length === 0) return null;
-
-    const opLogs = logs.filter(l => {
-      const logMonth = l.timestamp.substring(0, 7); 
-      return l.operatorName === statsOperator && logMonth === statsMonth;
-    });
-    
+    const opLogs = logs.filter(l => l.operatorName === statsOperator && l.timestamp.substring(0, 7) === statsMonth);
     const groupedData: Record<string, { points: number, hasUnrated: boolean }> = {};
-    
     opLogs.forEach(log => {
       const date = log.timestamp.split('T')[0]; 
-      
-      if (!groupedData[date]) {
-        groupedData[date] = { points: 0, hasUnrated: false };
-      }
+      if (!groupedData[date]) groupedData[date] = { points: 0, hasUnrated: false };
       groupedData[date].points += log.totalPoints;
-      
-      if (log.totalPoints === 0 && log.quantity > 0) {
-        groupedData[date].hasUnrated = true;
-      }
+      if (log.totalPoints === 0 && log.quantity > 0) groupedData[date].hasUnrated = true;
     });
-
-    const historyArray = Object.entries(groupedData)
-      .map(([date, data]) => ({ date, points: data.points, hasUnrated: data.hasUnrated }))
-      .sort((a, b) => a.date.localeCompare(b.date)); 
-
+    const historyArray = Object.entries(groupedData).map(([date, data]) => ({ date, ...data })).sort((a, b) => a.date.localeCompare(b.date)); 
     if (historyArray.length === 0) return { history: [], avgGeneral: 0, avgProductive: 0 };
-
     const totalPointsAll = historyArray.reduce((acc, day) => acc + day.points, 0);
-    const avgGeneral = totalPointsAll / historyArray.length;
-
+    const avgGeneral = (totalPointsAll / historyArray.length / dailyTarget) * 100;
+    
+    // Calculo puro
     const pureDays = historyArray.filter(day => day.points > 0 && !day.hasUnrated);
     const totalPointsPure = pureDays.reduce((acc, day) => acc + day.points, 0);
-    const avgProductive = pureDays.length > 0 ? totalPointsPure / pureDays.length : 0;
+    const avgProductive = pureDays.length > 0 ? (totalPointsPure / pureDays.length / dailyTarget) * 100 : 0;
 
     return {
       history: historyArray,
-      avgGeneral: (avgGeneral / dailyTarget) * 100,
-      avgProductive: (avgProductive / dailyTarget) * 100
+      avgGeneral,
+      avgProductive
     };
-
   }, [logs, statsOperator, statsMonth, dailyTarget]);
 
-
-  const handleForceUpdate = () => {
-    if(window.confirm("¿Estás seguro?\n\nEsto recargará el sistema para bajar la última versión y limpiar memorias viejas.")) {
-      localStorage.removeItem('cached_matrix');
-      localStorage.removeItem('cached_matrix_time');
-      if ('caches' in window) {
-        caches.keys().then((names) => { names.forEach((name) => { caches.delete(name); }); });
-      }
-      window.location.reload();
-    }
-  };
-
-  const handleSaveOperators = async (newList: string[]) => { await saveOperators(newList); setOperators(newList); };
-  const handleSaveModels = async (newList: string[]) => { await saveModels(newList); setModels(newList); };
-  const handleSaveOperations = async (newList: string[]) => { await saveOperations(newList); setOperations(newList); };
+  const handleForceUpdate = () => { localStorage.removeItem('cached_matrix'); localStorage.removeItem('cached_matrix_time'); window.location.reload(); };
+  const handleSaveOperators = async (l: string[]) => { await saveOperators(l); setOperators(l); };
+  const handleSaveModels = async (l: string[]) => { await saveModels(l); setModels(l); };
+  const handleSaveOperations = async (l: string[]) => { await saveOperations(l); setOperations(l); };
+  const handleSpecialDeleteOperator = async (n: string) => { if(confirm("¿Borrar?")) { await deleteOperatorWithData(n); setOperators(prev => prev.filter(op => op !== n)); } };
+  const fixMissingRule = (item: any) => { setNewRule({ sector: item.sector, model: item.model, operation: item.operation, pointsPerUnit: 0 }); setActiveTab('matrix'); window.scrollTo(0,0); };
+  const handleEditClick = (r: PointRule) => { setEditingId(r.id!); setNewRule(r); window.scrollTo(0,0); };
+  const handleCancelEdit = () => { setEditingId(null); setNewRule({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 }); };
+  const handleSaveRule = async () => { if(newRule.model) { setLoading(true); await (editingId ? updatePointRule({id: editingId, ...newRule} as PointRule) : addPointRule(newRule as PointRule)); await loadData(); setEditingId(null); setNewRule({ ...newRule, pointsPerUnit: 0 }); setLoading(false); }};
+  const handleDeleteRule = async (id?: string) => { if(id && confirm("¿Borrar?")) { setLoading(true); await deletePointRule(id); await loadData(); setLoading(false); } };
+  const handleAddNews = async () => { if(newsForm.title) { setLoading(true); await addNews({...newsForm, id: crypto.randomUUID(), createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + parseInt(newsForm.duration)*3600000).toISOString()} as any); await loadData(); setLoading(false); }};
+  const handleDeleteNews = async (id: string) => { await deleteNews(id); await loadData(); };
+  const handleFullBackup = async () => { setBackingUp(true); const blob = new Blob([JSON.stringify({ meta: { date: new Date().toISOString(), app: "TopSafe" }, config: { operators, models, operations }, matrix, logs, news: activeNews }, null, 2)], {type: "application/json"}); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `BACKUP_${new Date().toISOString().split('T')[0]}.json`; document.body.appendChild(link); link.click(); document.body.removeChild(link); setBackingUp(false); };
+  const handleBulkImport = async () => { if (!jsonImport || !confirm("¿Importar?")) return; setImporting(true); try { const data = JSON.parse(jsonImport); for (const item of data) if(item.model) await addPointRule({...item, model: item.model.toString(), pointsPerUnit: Number(item.pointsPerUnit)}); await loadData(); setJsonImport(''); } catch(e) { alert("Error JSON"); } finally { setImporting(false); } };
   
-  const handleSpecialDeleteOperator = async (name: string) => {
-    if (window.confirm(`⚠️ ALERTA DE SEGURIDAD ⚠️\n\n¿Eliminar a "${name}" y TODO su historial?`)) {
-      setLoading(true);
-      await deleteOperatorWithData(name);
-      setOperators(prev => prev.filter(op => op !== name));
-      setLoading(false);
-    }
-  };
-
-  const auditData = useMemo(() => {
-    const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
-    const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
-    const groupedIncidents: Record<string, { sector: string, model: string, operation: string, count: number, operators: Set<string> }> = {};
-    zeroPointIncidents.forEach(inc => {
-      const key = `${inc.sector}-${inc.model}-${inc.operation}`;
-      if (!groupedIncidents[key]) {
-        groupedIncidents[key] = { sector: inc.sector as string, model: inc.model, operation: inc.operation, count: 0, operators: new Set() };
-      }
-      groupedIncidents[key].count++;
-      groupedIncidents[key].operators.add(inc.operatorName);
-    });
-    return { modelsWithoutRules, missingRules: Object.values(groupedIncidents) };
-  }, [models, matrix, logs]);
-
-  // --- FUNCIÓN DE DESCARGA (EXCEL) ---
+  // Función para descargar el reporte de operaciones sin precio
   const handleDownloadAudit = () => {
     if (auditData.missingRules.length === 0) { alert("No hay alertas."); return; }
-    
-    const headers = ["Sector", "Modelo", "Operacion", "Veces Reportado", "Operarios"];
+    const headers = ["Sector", "Modelo", "Operacion", "Frecuencia", "Operarios"];
     const rows = auditData.missingRules.map((item: any) => [
       item.sector,
       item.model,
@@ -309,163 +212,58 @@ export const AdminPanel: React.FC = () => {
       item.count,
       Array.from(item.operators).join(', ')
     ]);
-
     const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url;
+    link.href = URL.createObjectURL(blob);
     link.download = `ALERTAS_SIN_PRECIO_${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const fixMissingRule = (item: { sector: string, model: string, operation: string }) => {
-    setNewRule({ sector: item.sector as Sector, model: item.model, operation: item.operation, pointsPerUnit: 0 });
-    setActiveTab('matrix');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  const auditData = useMemo(() => {
+    const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
+    const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
+    const groupedIncidents: Record<string, any> = {};
+    zeroPointIncidents.forEach(inc => {
+      const key = `${inc.sector}-${inc.model}-${inc.operation}`;
+      if (!groupedIncidents[key]) groupedIncidents[key] = { sector: inc.sector, model: inc.model, operation: inc.operation, count: 0, operators: new Set() };
+      groupedIncidents[key].count++;
+      groupedIncidents[key].operators.add(inc.operatorName);
+    });
+    return { modelsWithoutRules, missingRules: Object.values(groupedIncidents) };
+  }, [models, matrix, logs]);
 
-  const handleEditClick = (rule: PointRule) => {
-    setEditingId(rule.id!); 
-    setNewRule({ sector: rule.sector, model: rule.model, operation: rule.operation, pointsPerUnit: rule.pointsPerUnit });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-  const handleCancelEdit = () => { setEditingId(null); setNewRule({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 }); };
-
-  const handleSaveRule = async () => {
-    if (!newRule.model || !newRule.operation) { alert("Complete todos los campos"); return; }
-    const ruleData = { sector: newRule.sector as Sector, model: newRule.model, operation: newRule.operation, pointsPerUnit: Number(newRule.pointsPerUnit || 0) };
-    const exists = matrix.some(r => r.id !== editingId && r.sector === ruleData.sector && r.model === ruleData.model && r.operation === ruleData.operation);
-    if (exists) { alert("Ya existe esta regla."); return; }
-
-    setLoading(true);
-    try {
-      if (editingId) await updatePointRule({ id: editingId, ...ruleData });
-      else await addPointRule(ruleData as PointRule);
-      await loadData();
-      setEditingId(null); setNewRule(prev => ({ ...prev, pointsPerUnit: 0 }));
-    } catch (e) { alert("Error al guardar"); } finally { setLoading(false); }
-  };
-
-  const handleDeleteRule = async (id?: string) => {
-    if (id && window.confirm("¿Eliminar regla?")) { setLoading(true); await deletePointRule(id); await loadData(); }
-  };
-
-  const handleAddNews = async () => {
-    if (!newsForm.title || !newsForm.content) { alert("Complete título y mensaje"); return; }
-    setLoading(true);
-    const now = new Date();
-    const expires = new Date(now);
-    expires.setHours(expires.getHours() + parseInt(newsForm.duration));
-    const newItem: NewsItem = { id: crypto.randomUUID(), title: newsForm.title, content: newsForm.content, createdAt: now.toISOString(), expiresAt: expires.toISOString(), priority: 'normal' };
-    await addNews(newItem);
-    setNewsForm({ title: '', content: '', duration: '24' });
-    await loadData(); setLoading(false);
-  };
-
-  const handleDeleteNews = async (id: string) => {
-    if (window.confirm("¿Borrar comunicado?")) { setLoading(true); await deleteNews(id); await loadData(); setLoading(false); }
-  };
-
-  const handleFullBackup = async () => {
-    setBackingUp(true);
-    try {
-      const backupData = {
-        meta: { date: new Date().toISOString(), version: "2.0", app: "TopSafe Production" },
-        config: { operators, models, operations },
-        matrix: matrix,
-        logs: logs,
-        news: activeNews
-      };
-      const jsonString = JSON.stringify(backupData, null, 2);
-      const blob = new Blob([jsonString], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `BACKUP_TOPSAFE_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (e) { console.error(e); alert("Error al generar el respaldo."); } finally { setBackingUp(false); }
-  };
-
-  const handleBulkImport = async () => {
-    if (!jsonImport || !window.confirm("¿Importar datos?")) return;
-    setImporting(true);
-    try {
-      const data = JSON.parse(jsonImport);
-      if (!Array.isArray(data)) { alert("Por favor use el formato de lista [...] para importar matriz."); return; }
-      let added = 0;
-      for (const item of data) {
-        if (item.sector && item.model && item.operation) {
-          const exists = matrix.some(r => r.sector === item.sector && r.model === item.model.toString() && r.operation === item.operation);
-          if (!exists) { await addPointRule({ ...item, model: item.model.toString(), pointsPerUnit: Number(item.pointsPerUnit) }); added++; }
-        }
-      }
-      await loadData(); alert(`Importados: ${added}`); setJsonImport('');
-    } catch (e) { alert("Error en JSON"); } finally { setImporting(false); }
-  };
-
-  const filteredMatrix = matrix.filter(rule => 
-    rule.model.toLowerCase().includes(matrixSearch.toLowerCase()) || 
-    rule.operation.toLowerCase().includes(matrixSearch.toLowerCase()) ||
-    rule.sector.toLowerCase().includes(matrixSearch.toLowerCase())
-  );
+  const filteredMatrix = matrix.filter(r => r.model.toLowerCase().includes(matrixSearch.toLowerCase()));
 
   if (loading && matrix.length === 0) return <div className="flex justify-center p-10"><Loader2 className="animate-spin w-8 h-8 text-orange-600"/></div>;
 
   return (
     <div className="space-y-6 pb-20">
       <div className="bg-slate-800 text-white p-6 rounded-xl shadow-md border-l-4 border-orange-600">
-        <div className="flex flex-col md:flex-row justify-between md:items-start gap-4">
-            <div>
-                <h2 className="text-2xl font-bold mb-2">Configuración TopSafe</h2>
-                <div className="flex flex-wrap gap-4 mt-6">
-                  <button onClick={() => setActiveTab('stats')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${activeTab === 'stats' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}><BarChart3 className="w-4 h-4"/> Reportes</button>
-                  <button onClick={() => setActiveTab('manual')} className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 ${activeTab === 'manual' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}><Keyboard className="w-4 h-4"/> Carga Manual</button>
-                  <button onClick={() => setActiveTab('lists')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'lists' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Catálogos</button>
-                  <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'matrix' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Matriz</button>
-                  <button onClick={() => setActiveTab('news')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'news' ? 'bg-orange-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Comunicados</button>
-                  <button onClick={() => setActiveTab('import')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'import' ? 'bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'}`}>Datos</button>
-                </div>
-            </div>
-            <button 
-                onClick={handleForceUpdate}
-                className="bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 border border-slate-600 transition-all shadow-sm"
-                title="Usar si no se ven los cambios recientes"
-            >
-                <RefreshCw className="w-4 h-4" />
-                ACTUALIZAR SISTEMA
-            </button>
+        <div className="flex justify-between items-start"><h2 className="text-2xl font-bold">Configuración TopSafe</h2><button onClick={handleForceUpdate} className="bg-slate-700 px-3 py-1 rounded text-xs"><RefreshCw className="w-4 h-4"/></button></div>
+        <div className="flex flex-wrap gap-4 mt-6">
+            {['stats', 'manual', 'lists', 'matrix', 'news', 'import'].map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab as any)} className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize flex items-center gap-2 ${activeTab === tab ? (tab==='manual'?'bg-indigo-600':'bg-orange-600') : 'bg-slate-700'}`}>
+                    {tab==='stats'?<><BarChart3 className="w-4 h-4"/>Reportes</> : tab==='manual'?<><Keyboard className="w-4 h-4"/>Carga Manual</> : tab}
+                </button>
+            ))}
         </div>
       </div>
 
-      {/* --- PESTAÑA: CARGA MANUAL --- */}
       {activeTab === 'manual' && (
         <div className="animate-in fade-in zoom-in-95 duration-300">
            <OperatorForm isManager={true} />
         </div>
       )}
 
-      {/* --- PESTAÑA: REPORTES Y ESTADÍSTICAS --- */}
       {activeTab === 'stats' && (
-        <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in zoom-in-95 duration-300">
             <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><BarChart3 className="w-6 h-6 text-orange-600"/> Reporte Mensual</h3>
             <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Operario</label>
-                <select className="w-full p-3 border rounded-lg font-bold" value={statsOperator} onChange={(e) => setStatsOperator(e.target.value)}>
-                  <option value="">-- Seleccionar --</option>
-                  {operators.map(op => <option key={op} value={op}>{op}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mes</label>
-                <input type="month" className="w-full p-3 border rounded-lg font-bold" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} />
-              </div>
+              <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Operario</label><select className="w-full p-3 border rounded-lg font-bold" value={statsOperator} onChange={(e) => setStatsOperator(e.target.value)}><option value="">-- Seleccionar --</option>{operators.map(op => <option key={op} value={op}>{op}</option>)}</select></div>
+              <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mes</label><input type="month" className="w-full p-3 border rounded-lg font-bold" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} /></div>
             </div>
             {statsOperator && operatorStats ? (
               <div className="space-y-6">
@@ -505,7 +303,7 @@ export const AdminPanel: React.FC = () => {
                    <div className="flex-1">
                       <div className="flex justify-between items-start">
                         <div><h4 className="font-bold text-red-800 text-sm">Alertas (0 Pts)</h4><p className="text-xs text-red-600 mb-2">Operaciones reportadas sin valor.</p></div>
-                        <button onClick={handleDownloadAudit} disabled={auditData.missingRules.length === 0} className="bg-white border border-red-200 text-red-600 hover:bg-red-50 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 transition-colors disabled:opacity-50"><Download className="w-3 h-3"/> Excel</button>
+                        <button onClick={handleDownloadAudit} disabled={auditData.missingRules.length === 0} className="bg-white border border-red-200 text-red-600 hover:bg-red-50 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"><Download className="w-3 h-3"/> Excel</button>
                       </div>
                       {auditData.missingRules.length === 0 ? <div className="text-sm font-bold text-green-700">¡Todo en orden!</div> : <div className="space-y-2 mt-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">{auditData.missingRules.map((item: any, idx: number) => (<div key={idx} className="bg-white p-2 rounded border border-red-100 flex justify-between items-center group"><div><div className="text-xs font-bold text-slate-800">{item.model}</div><div className="text-[10px] text-slate-500">{item.operation} • {item.count}x</div></div><button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded">Fix</button></div>))}</div>}
                    </div>
@@ -530,7 +328,30 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      {/* Las otras pestañas (News, Import) se mantienen igual, las omito para no exceder caracteres pero deben estar */}
+      {activeTab === 'news' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-fit">
+              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Megaphone className="w-5 h-5 text-orange-600" /> Nuevo Comunicado</h3>
+              <div className="space-y-4">
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">TÍTULO</label><input className="w-full border p-2 rounded bg-slate-50" value={newsForm.title} onChange={e => setNewsForm({...newsForm, title: e.target.value})}/></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">MENSAJE</label><textarea className="w-full border p-2 rounded bg-slate-50 h-24" value={newsForm.content} onChange={e => setNewsForm({...newsForm, content: e.target.value})}/></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">DURACIÓN</label><select className="w-full border p-2 rounded bg-slate-50" value={newsForm.duration} onChange={e => setNewsForm({...newsForm, duration: e.target.value})}><option value="24">24 Horas</option><option value="48">48 Horas</option><option value="168">1 Semana</option></select></div>
+                <button onClick={handleAddNews} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700">Publicar</button>
+              </div>
+          </div>
+          <div className="space-y-4">
+              {activeNews.map(item => (
+                <div key={item.id} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500 relative">
+                  <button onClick={() => handleDeleteNews(item.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                  <h4 className="font-bold text-slate-800">{item.title}</h4>
+                  <p className="text-slate-600 text-sm mt-1">{item.content}</p>
+                  <div className="mt-3 text-xs text-slate-400">Vence: {new Date(item.expiresAt).toLocaleString()}</div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {activeTab === 'import' && (
         <div className="space-y-8 animate-in fade-in duration-300">
           
@@ -674,7 +495,7 @@ export const AdminPanel: React.FC = () => {
           </div>
 
         </div>
-      )} 
+      )}
     </div>
   );
 };
