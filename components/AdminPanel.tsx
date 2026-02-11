@@ -133,7 +133,7 @@ export const AdminPanel: React.FC = () => {
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [logs, setLogs] = useState<ProductionLog[]>([]);
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
-  
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
   const [matrixSearch, setMatrixSearch] = useState(''); 
@@ -210,19 +210,19 @@ export const AdminPanel: React.FC = () => {
             operation: inc.operation, 
             count: 0, 
             operators: new Set(),
-            comments: new Set() // Nuevo Set para comentarios
+            comments: new Set() // Nuevo Set para comentarios únicos
         };
       }
       groupedIncidents[key].count++;
       groupedIncidents[key].operators.add(inc.operatorName);
-      if (inc.comments) {
+      if (inc.comments && inc.comments.trim() !== "") {
           groupedIncidents[key].comments.add(inc.comments);
       }
     });
     return { modelsWithoutRules, missingRules: Object.values(groupedIncidents) };
   }, [models, matrix, logs]);
 
-  // --- DESCARGA DE EXCEL MEJORADA (CON OBSERVACIONES) ---
+  // --- FUNCIÓN DE DESCARGA (EXCEL CON OBSERVACIONES) ---
   const handleDownloadAudit = () => {
     if (auditData.missingRules.length === 0) { alert("No hay alertas."); return; }
     
@@ -233,13 +233,14 @@ export const AdminPanel: React.FC = () => {
       item.operation,
       item.count,
       Array.from(item.operators).join(', '),
-      Array.from(item.comments).join(' | ') // Unimos los comentarios con una barra
+      Array.from(item.comments).join(' | ') // Unimos los comentarios con una barra vertical
     ]);
 
     const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `ALERTAS_SIN_PRECIO_${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(link);
     link.click();
@@ -263,8 +264,14 @@ export const AdminPanel: React.FC = () => {
         </div>
       </div>
 
-      {activeTab === 'manual' && <div className="animate-in fade-in zoom-in-95 duration-300"><OperatorForm isManager={true} /></div>}
+      {/* --- NUEVA PESTAÑA: CARGA MANUAL --- */}
+      {activeTab === 'manual' && (
+        <div className="animate-in fade-in zoom-in-95 duration-300">
+           <OperatorForm isManager={true} />
+        </div>
+      )}
 
+      {/* --- PESTAÑA: REPORTES Y ESTADÍSTICAS --- */}
       {activeTab === 'stats' && (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in zoom-in-95 duration-300">
             <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><BarChart3 className="w-6 h-6 text-orange-600"/> Reporte Mensual</h3>
@@ -300,30 +307,57 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
       
+      {/* --- PESTAÑA: MATRIZ --- */}
       {activeTab === 'matrix' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3"><div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div><div className="flex-1"><h4 className="font-bold text-slate-800 text-sm">Sin Configurar</h4><div className="text-2xl font-black text-slate-700">{auditData.modelsWithoutRules.length}</div></div></div>
+             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3"><div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div><div className="flex-1"><h4 className="font-bold text-slate-800 text-sm">Productos sin Configurar</h4><div className="text-2xl font-black text-slate-700">{auditData.modelsWithoutRules.length}</div></div></div>
+             
+             {/* --- TARJETA DE ALERTAS CON BOTÓN DE EXPORTAR --- */}
              <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex flex-col gap-4 shadow-sm">
                 <div className="flex items-start gap-3">
                    <div className="bg-red-100 p-2 rounded-full animate-pulse"><AlertOctagon className="w-5 h-5 text-red-600"/></div>
                    <div className="flex-1">
                       <div className="flex justify-between items-start">
-                        <div><h4 className="font-bold text-red-800 text-sm">Alertas (0 Pts)</h4><p className="text-xs text-red-600 mb-2">Operaciones reportadas sin valor.</p></div>
-                        <button onClick={handleDownloadAudit} disabled={auditData.missingRules.length === 0} className="bg-white border border-red-200 text-red-600 hover:bg-red-50 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 disabled:opacity-50"><Download className="w-3 h-3"/> Excel</button>
+                        <div>
+                          <h4 className="font-bold text-red-800 text-sm">Alertas (0 Pts)</h4>
+                          <p className="text-xs text-red-600 mb-2">Operaciones reportadas sin valor.</p>
+                        </div>
+                        {/* BOTÓN NUEVO DE DESCARGA */}
+                        <button 
+                            onClick={handleDownloadAudit}
+                            disabled={auditData.missingRules.length === 0}
+                            className="bg-white border border-red-200 text-red-600 hover:bg-red-50 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Download className="w-3 h-3"/> Excel
+                        </button>
                       </div>
-                      {auditData.missingRules.length === 0 ? <div className="text-sm font-bold text-green-700">¡Todo en orden!</div> : <div className="space-y-2 mt-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">{auditData.missingRules.map((item: any, idx: number) => (<div key={idx} className="bg-white p-2 rounded border border-red-100 flex justify-between items-center group"><div><div className="text-xs font-bold text-slate-800">{item.model}</div><div className="text-[10px] text-slate-500">{item.operation} • {item.count}x</div></div><button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded">Fix</button></div>))}</div>}
+                      
+                      {auditData.missingRules.length === 0 ? <div className="text-sm font-bold text-green-700">¡Todo en orden!</div> : (
+                        <div className="space-y-2 mt-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                            {auditData.missingRules.map((item: any, idx: number) => (
+                                <div key={idx} className="bg-white p-2 rounded border border-red-100 flex justify-between items-center group">
+                                    <div>
+                                        <div className="text-xs font-bold text-slate-800">{item.model}</div>
+                                        <div className="text-[10px] text-slate-500">{item.operation} • {item.count}x</div>
+                                    </div>
+                                    <button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700">Fix</button>
+                                </div>
+                            ))}
+                        </div>
+                      )}
                    </div>
                 </div>
              </div>
           </div>
-          <div className={`bg-white p-6 rounded-xl shadow-sm border ${editingId ? 'border-blue-500' : 'border-orange-100'}`}>
+
+          <div className={`bg-white p-6 rounded-xl shadow-sm border ${editingId ? 'border-blue-500' : 'border-orange-100'} transition-colors`}>
             <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-slate-800 flex items-center gap-2">{editingId ? <RefreshCw className="w-5 h-5 text-blue-600" /> : <Calculator className="w-5 h-5 text-orange-600" />}{editingId ? 'Editando' : 'Nueva Regla'}</h3></div>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-              <div><label className="text-xs font-bold text-slate-500">SECTOR</label><select className="w-full border p-2 rounded" value={newRule.sector} onChange={e => setNewRule({...newRule, sector: e.target.value as Sector})}>{Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}</select></div>
-              <div><label className="text-xs font-bold text-slate-500">MODELO</label><select className="w-full border p-2 rounded" value={newRule.model} onChange={e => setNewRule({...newRule, model: e.target.value})}><option value="">Select...</option>{models.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-              <div><label className="text-xs font-bold text-slate-500">OPERACIÓN</label><select className="w-full border p-2 rounded" value={newRule.operation} onChange={e => setNewRule({...newRule, operation: e.target.value})}><option value="">Select...</option>{operations.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-              <div><label className="text-xs font-bold text-slate-500">PUNTOS</label><input type="number" step="0.1" className="w-full border p-2 rounded font-bold" value={newRule.pointsPerUnit} onChange={e => setNewRule({...newRule, pointsPerUnit: parseFloat(e.target.value)})}/></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Sector</label><select className="w-full border p-2 rounded" value={newRule.sector} onChange={e => setNewRule({...newRule, sector: e.target.value as Sector})}>{Object.values(Sector).map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Modelo</label><select className="w-full border p-2 rounded" value={newRule.model} onChange={e => setNewRule({...newRule, model: e.target.value})}><option value="">Select...</option>{models.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Operación</label><select className="w-full border p-2 rounded" value={newRule.operation} onChange={e => setNewRule({...newRule, operation: e.target.value})}><option value="">Select...</option>{operations.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+              <div><label className="text-xs font-semibold text-slate-500 uppercase">Puntos (Unitario)</label><input type="number" step="0.1" className="w-full border p-2 rounded font-bold" value={newRule.pointsPerUnit} onChange={e => setNewRule({...newRule, pointsPerUnit: parseFloat(e.target.value)})}/></div>
               <div className="flex gap-2">{editingId && <button onClick={handleCancelEdit} className="bg-slate-200 px-3 rounded font-bold text-slate-600">X</button>}<button onClick={handleSaveRule} disabled={loading} className={`${editingId ? 'bg-blue-600' : 'bg-orange-600'} text-white font-bold py-2 px-4 rounded flex-1`}>{editingId ? 'Update' : 'Add'}</button></div>
             </div>
           </div>
@@ -436,6 +470,44 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
 
+          <hr className="border-slate-200" />
+
+          {/* SECCIÓN NUEVA: RECÁLCULO DE PUNTOS */}
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <RefreshCw className="w-6 h-6 text-blue-600"/> Mantenimiento: Recálculo de Puntos
+            </h3>
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-100">
+              <p className="text-sm text-slate-500 mb-4">
+                Utilice esta función si modificó valores en la Matriz de Puntos y desea que esos cambios 
+                <span className="font-bold text-blue-600"> se apliquen retroactivamente </span> 
+                a todo el historial de producción ya cargado.
+              </p>
+              
+              <button 
+                onClick={async () => {
+                  if(window.confirm("¿Recalcular TODO el historial basándose en la Matriz actual?")) {
+                    setLoading(true);
+                    try {
+                      const count = await recalculateAllHistory();
+                      alert(`✅ Proceso terminado.\n\nSe actualizaron ${count} registros con los nuevos valores.`);
+                      await loadData(); // Recargamos para ver cambios
+                    } catch (e) {
+                      alert("Error al recalcular.");
+                    } finally {
+                      setLoading(false);
+                    }
+                  }
+                }} 
+                disabled={loading}
+                className="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-blue-700 flex justify-center items-center gap-2"
+              >
+                {loading ? <Loader2 className="animate-spin w-5 h-5"/> : <RefreshCw className="w-5 h-5"/>} 
+                {loading ? 'Calculando...' : 'RECALCULAR HISTORIAL COMPLETO'}
+              </button>
+            </div>
+          </div>
+          
           <hr className="border-slate-200" />
 
           {/* SECCIÓN 2: CARGA MASIVA */}
