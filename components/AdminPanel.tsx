@@ -21,7 +21,7 @@ import {
   BarChart3, Filter, Target, Calendar, Key, Keyboard 
 } from 'lucide-react';
 
-// IMPORTAMOS EL FORMULARIO
+// IMPORTAMOS EL FORMULARIO (Asegúrate de que el archivo exista en la misma carpeta)
 import { OperatorForm } from './OperatorForm';
 
 // --- UTILIDAD PARA FECHAS ---
@@ -42,7 +42,7 @@ interface ListManagerProps {
   onSave: (d: string[]) => Promise<void>;
   icon: any;
   customDelete?: (item: string) => Promise<void>;
-  allowPin?: boolean; 
+  allowPin?: boolean; // Prop para activar gestión de claves
 }
 
 const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }: ListManagerProps) => {
@@ -56,39 +56,55 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
     if (newItem.trim() && !data.includes(newItem)) {
       setSaving(true);
       await onSave([...data, newItem]);
+      
+      // Si es operario, pedimos crear PIN de una vez
       if (allowPin) {
-        const pin = prompt(`Ingrese un PIN de 4 dígitos para "${newItem}":`, "1234");
-        if (pin) try { await setOperatorPin(newItem, pin); } catch (e) { console.error(e); }
+        const pin = prompt(`Ingrese un PIN de 4 dígitos para el nuevo operario "${newItem}":`, "1234");
+        if (pin) {
+             try {
+                await setOperatorPin(newItem, pin);
+             } catch (e) {
+                console.error("Error guardando PIN", e);
+             }
+        }
       }
+
       setNewItem('');
       setSaving(false);
     }
   };
 
+  // Función para cambiar PIN manualmente
   const handleSetPin = async (item: string) => {
     const newPin = prompt(`Ingrese el NUEVO PIN de 4 dígitos para "${item}":`);
     if (newPin && newPin.length >= 4) {
       setSaving(true);
       await setOperatorPin(item, newPin);
       setSaving(false);
-      alert(`✅ PIN actualizado para ${item}`);
-    } else if (newPin) { alert("El PIN debe tener al menos 4 caracteres."); }
+      alert(`✅ PIN actualizado correctamente para ${item}`);
+    } else if (newPin) {
+      alert("⚠️ El PIN debe tener al menos 4 caracteres.");
+    }
   };
 
   const handleDelete = async (item: string) => {
     if (customDelete) { await customDelete(item); return; }
-    if (window.confirm(`¿Eliminar "${item}"?`)) {
+    if (window.confirm(`¿Está seguro de eliminar "${item}"?`)) {
       setSaving(true);
-      await onSave(data.filter(i => i !== item));
+      const updatedList = data.filter(i => i !== item);
+      await onSave(updatedList);
       setSaving(false);
     }
   };
+
+  const startEdit = (item: string) => { setEditingItem(item); setEditValue(item); };
 
   const saveEdit = async () => {
     if (!editValue.trim() || editValue === editingItem) { setEditingItem(null); return; }
     if (data.includes(editValue)) { alert("Ya existe."); return; }
     setSaving(true);
-    await onSave(data.map(item => item === editingItem ? editValue : item));
+    const updatedList = data.map(item => item === editingItem ? editValue : item);
+    await onSave(updatedList);
     setEditingItem(null); setEditValue(''); setSaving(false);
   };
 
@@ -97,26 +113,46 @@ const ListManager = ({ title, data, onSave, icon: Icon, customDelete, allowPin }
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 h-full relative flex flex-col">
       {saving && <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center"><Loader2 className="animate-spin text-orange-600"/></div>}
-      <div className="flex items-center gap-2 mb-4 text-slate-800"><Icon className="w-5 h-5 text-orange-600" /><h3 className="font-bold">{title}</h3><span className="ml-auto text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">{data.length}</span></div>
-      <div className="flex gap-2 mb-4"><input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm"/><button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg"><Plus className="w-5 h-5"/></button></div>
-      <div className="relative mb-2"><Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/><input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg"/></div>
+      <div className="flex items-center gap-2 mb-4 text-slate-800">
+          <Icon className="w-5 h-5 text-orange-600" />
+          <h3 className="font-bold">{title}</h3>
+          <span className="ml-auto text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">{data.length}</span>
+      </div>
+      <div className="flex gap-2 mb-4">
+        <input type="text" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={`Nuevo...`} className="flex-1 border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm outline-none text-slate-900 focus:ring-2 focus:ring-orange-200" />
+        <button onClick={handleAdd} disabled={!newItem} className="bg-orange-600 text-white p-2 rounded-lg hover:bg-orange-700 disabled:opacity-50"><Plus className="w-5 h-5" /></button>
+      </div>
+      <div className="relative mb-2">
+        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>
+        <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 outline-none focus:border-blue-300 transition-colors"/>
+      </div>
       <div className="space-y-2 max-h-80 overflow-y-auto pr-1 custom-scrollbar flex-1">
         {filteredData.map((item) => (
-          <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
+          <div key={item} className={`flex justify-between items-center px-3 py-2 rounded text-sm group transition-colors ${editingItem === item ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
             {editingItem === item ? (
-              <div className="flex w-full items-center gap-2"><input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="flex-1 bg-white border rounded px-2 py-1" autoFocus/><button onClick={saveEdit}><Check className="w-4 h-4 text-green-600"/></button><button onClick={() => setEditingItem(null)}><X className="w-4 h-4 text-red-500"/></button></div>
+              <div className="flex w-full items-center gap-2">
+                <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="flex-1 bg-white border border-blue-300 rounded px-2 py-1 text-slate-900 outline-none text-xs font-bold" autoFocus />
+                <button onClick={saveEdit} className="text-green-600 hover:bg-green-100 p-1 rounded"><Check className="w-4 h-4"/></button>
+                <button onClick={() => setEditingItem(null)} className="text-red-500 hover:bg-red-100 p-1 rounded"><X className="w-4 h-4"/></button>
+              </div>
             ) : (
               <>
                 <span className="text-slate-700 font-medium truncate flex-1">{item}</span>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {allowPin && <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1"><Key className="w-3.5 h-3.5"/></button>}
-                  <button onClick={() => { setEditingItem(item); setEditValue(item); }} className="text-slate-400 hover:text-blue-600 p-1"><Pencil className="w-3.5 h-3.5"/></button>
-                  <button onClick={() => handleDelete(item)} className="text-slate-400 hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5"/></button>
+                  {/* BOTÓN DE CLAVE */}
+                  {allowPin && (
+                    <button onClick={() => handleSetPin(item)} className="text-slate-400 hover:text-amber-600 p-1.5 rounded hover:bg-amber-50 transition-colors" title="Asignar PIN">
+                        <Key className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button onClick={() => startEdit(item)} className="text-slate-400 hover:text-blue-600 p-1.5 rounded hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleDelete(item)} className="text-slate-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </>
             )}
           </div>
         ))}
+        {filteredData.length === 0 && <p className="text-slate-400 text-xs italic text-center py-4">No se encontraron resultados</p>}
       </div>
     </div>
   );
@@ -130,18 +166,26 @@ export const AdminPanel: React.FC = () => {
   const [operators, setOperators] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [operations, setOperations] = useState<string[]>([]);
+  
   const [matrix, setMatrix] = useState<PointRule[]>([]);
   const [logs, setLogs] = useState<ProductionLog[]>([]);
   const [dailyTarget, setDailyTarget] = useState<number>(24960);
 
+  // Estados para Edición
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<Partial<PointRule>>({ sector: Sector.CORTE, model: '', operation: '', pointsPerUnit: 0 });
   const [matrixSearch, setMatrixSearch] = useState(''); 
+
+  // Estados para Noticias
   const [activeNews, setActiveNews] = useState<NewsItem[]>([]);
   const [newsForm, setNewsForm] = useState({ title: '', content: '', duration: '24' });
+
+  // Estados para Import/Export
   const [jsonImport, setJsonImport] = useState('');
   const [importing, setImporting] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+
+  // Estados para REPORTES
   const [statsOperator, setStatsOperator] = useState(''); 
   const [statsMonth, setStatsMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
@@ -153,8 +197,15 @@ export const AdminPanel: React.FC = () => {
       const allLogsQuery = query(collection(db, 'production_logs'), orderBy('timestamp', 'desc'));
       const allLogsSnapshot = await getDocs(allLogsQuery);
       const allProductionLogs = allLogsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductionLog));
-      const [ops, mods, opers, mtx, news, target] = await Promise.all([getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getProductivityTarget()]);
-      setOperators(ops); setModels(mods); setOperations(opers); setMatrix(mtx); setActiveNews(news); setDailyTarget(target); setLogs(allProductionLogs); 
+
+      const [ops, mods, opers, mtx, news, target] = await Promise.all([
+        getOperators(), getModels(), getOperations(), getPointsMatrix(), getActiveNews(), getProductivityTarget()
+      ]);
+      
+      setOperators(ops); setModels(mods); setOperations(opers); 
+      setMatrix(mtx); setActiveNews(news); setDailyTarget(target);
+      setLogs(allProductionLogs); 
+
     } catch (e) { console.error(e); } finally { setLoading(false); }
   };
 
@@ -197,8 +248,6 @@ export const AdminPanel: React.FC = () => {
   const auditData = useMemo(() => {
     const modelsWithoutRules = models.filter(m => !matrix.some(r => r.model === m));
     const zeroPointIncidents = logs.filter(l => l.totalPoints === 0 && l.quantity > 0);
-    
-    // Objeto para agrupar: Clave -> {datos, contadores, sets}
     const groupedIncidents: Record<string, { sector: string, model: string, operation: string, count: number, operators: Set<string>, comments: Set<string> }> = {};
     
     zeroPointIncidents.forEach(inc => {
@@ -210,7 +259,7 @@ export const AdminPanel: React.FC = () => {
             operation: inc.operation, 
             count: 0, 
             operators: new Set(),
-            comments: new Set() // Nuevo Set para comentarios únicos
+            comments: new Set() 
         };
       }
       groupedIncidents[key].count++;
@@ -233,14 +282,13 @@ export const AdminPanel: React.FC = () => {
       item.operation,
       item.count,
       Array.from(item.operators).join(', '),
-      Array.from(item.comments).join(' | ') // Unimos los comentarios con una barra vertical
+      Array.from(item.comments).join(' | ') 
     ]);
 
     const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url;
+    link.href = URL.createObjectURL(blob);
     link.download = `ALERTAS_SIN_PRECIO_${new Date().toISOString().split('T')[0]}.csv`;
     document.body.appendChild(link);
     link.click();
@@ -274,7 +322,7 @@ export const AdminPanel: React.FC = () => {
       {/* --- PESTAÑA: REPORTES Y ESTADÍSTICAS --- */}
       {activeTab === 'stats' && (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 animate-in fade-in zoom-in-95 duration-300">
-            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><BarChart3 className="w-6 h-6 text-orange-600"/> Reporte Mensual</h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2"><BarChart3 className="w-6 h-6 text-orange-600"/> Reporte Mensual de Productividad</h3>
             <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Operario</label><select className="w-full p-3 border rounded-lg font-bold" value={statsOperator} onChange={(e) => setStatsOperator(e.target.value)}><option value="">-- Seleccionar --</option>{operators.map(op => <option key={op} value={op}>{op}</option>)}</select></div>
               <div><label className="block text-xs font-bold text-slate-500 uppercase mb-1">Mes</label><input type="month" className="w-full p-3 border rounded-lg font-bold" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} /></div>
@@ -311,7 +359,15 @@ export const AdminPanel: React.FC = () => {
       {activeTab === 'matrix' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3"><div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div><div className="flex-1"><h4 className="font-bold text-slate-800 text-sm">Productos sin Configurar</h4><div className="text-2xl font-black text-slate-700">{auditData.modelsWithoutRules.length}</div></div></div>
+             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex items-start gap-3"><div className="bg-slate-200 p-2 rounded-full"><FileSearch className="w-5 h-5 text-slate-600"/></div>
+             <div className="flex-1">
+                 <h4 className="font-bold text-slate-800 text-sm">Productos sin Configurar</h4>
+                 <p className="text-xs text-slate-500 mb-2">Modelos que no tienen ninguna regla de precio.</p>
+                 <div className="text-2xl font-black text-slate-700">{auditData.modelsWithoutRules.length}</div>
+                 {/* LISTADO DE MODELOS RESTAURADO */}
+                 {auditData.modelsWithoutRules.length > 0 && <div className="mt-2 text-xs text-slate-600 bg-slate-100 p-2 rounded max-h-24 overflow-y-auto custom-scrollbar">{auditData.modelsWithoutRules.join(', ')}</div>}
+             </div>
+             </div>
              
              {/* --- TARJETA DE ALERTAS CON BOTÓN DE EXPORTAR --- */}
              <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex flex-col gap-4 shadow-sm">
@@ -341,7 +397,7 @@ export const AdminPanel: React.FC = () => {
                                         <div className="text-xs font-bold text-slate-800">{item.model}</div>
                                         <div className="text-[10px] text-slate-500">{item.operation} • {item.count}x</div>
                                     </div>
-                                    <button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700">Fix</button>
+                                    <button onClick={() => fixMissingRule(item)} className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded hover:bg-red-700">Arreglar</button>
                                 </div>
                             ))}
                         </div>
@@ -393,6 +449,7 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
+      {/* --- PESTAÑA: DATOS & BACKUP --- */}
       {activeTab === 'import' && (
         <div className="space-y-8 animate-in fade-in duration-300">
           
